@@ -109,16 +109,23 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
             except Exception:
                 pass
                 
-            # Validar si logramos extraer información sustancial
-            if profile_data["name"] or profile_data["about"] or profile_data["experience"]:
+            # Validar si logramos extraer información sustancial y no caímos en un muro de registro/login
+            name_lower = profile_data["name"].lower()
+            is_login_wall = (
+                name_lower in ("", "join linkedin", "iniciar sesión", "sign in", "welcome to linkedin") or
+                "join linkedin" in name_lower or
+                "iniciar sesión" in name_lower
+            )
+            
+            if (profile_data["name"] or profile_data["about"] or profile_data["experience"]) and not is_login_wall:
                 profile_data["status"] = "success"
                 print(f"Perfil de '{profile_data['name']}' scrapeado con éxito.")
             else:
-                # Comprobar si se detectó pantalla de restricción
-                body_text = profile_data["raw_text"]
-                if "join linkedin" in body_text.lower() or "iniciar sesión" in body_text.lower():
+                # Comprobar si se detectó pantalla de restricción o muro de registro
+                body_text = profile_data["raw_text"].lower()
+                if "join linkedin" in body_text or "iniciar sesión" in body_text or "sign in" in body_text or is_login_wall:
                     profile_data["status"] = "session_expired"
-                    profile_data["error_message"] = "LinkedIn solicitó iniciar sesión. Las cookies son inválidas o insuficientes."
+                    profile_data["error_message"] = "LinkedIn solicitó iniciar sesión o registrarse. Las cookies de sesión son inválidas, expiraron o no se cargaron correctamente."
                 else:
                     profile_data["status"] = "empty"
                     profile_data["error_message"] = "No se encontraron datos en el perfil público/privado."
