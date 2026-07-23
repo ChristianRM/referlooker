@@ -1,5 +1,29 @@
+import os
 import requests
 import urllib.parse
+
+def load_dotenv(dotenv_path=".env"):
+    """
+    Parsea de manera sencilla el archivo .env si existe y carga las variables en os.environ.
+    Evita dependencias de terceros como python-dotenv.
+    """
+    if os.path.exists(dotenv_path):
+        try:
+            with open(dotenv_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        # Remover comillas si existen en el valor
+                        val = val.strip().strip("'").strip('"')
+                        os.environ[key.strip()] = val
+        except Exception as e:
+            print(f"[Advertencia] No se pudo leer el archivo .env: {e}")
+
+# Cargar variables del entorno al importar el módulo
+load_dotenv()
 
 def clean_linkedin_url(url: str) -> str:
     """
@@ -37,11 +61,12 @@ def search_candidates(query: str, config: dict) -> list:
     print(f"Iniciando búsqueda usando motor '{engine}' con query: {query}")
     
     if engine == "google_cse":
-        api_key = engine_config.get("google_api_key", "")
-        cx = engine_config.get("google_cx", "")
+        # Priorizar variables de entorno (desde el archivo .env)
+        api_key = os.getenv("GOOGLE_API_KEY") or engine_config.get("google_api_key", "")
+        cx = os.getenv("GOOGLE_CX") or engine_config.get("google_cx", "")
         
-        if not api_key or not cx or api_key == "YOUR_GOOGLE_API_KEY" or cx == "YOUR_GOOGLE_CSE_ID":
-            print("[Advertencia] Google Custom Search API Key o CX no configurados correctamente en config.json.")
+        if not api_key or not cx or api_key in ("YOUR_GOOGLE_API_KEY", "Ver archivo .env", "") or cx in ("YOUR_GOOGLE_CSE_ID", "Ver archivo .env", ""):
+            print("[Advertencia] Google Custom Search API Key o CX no configurados. Configúralos en tu archivo '.env'.")
             return []
             
         url = "https://www.googleapis.com/customsearch/v1"
@@ -66,10 +91,11 @@ def search_candidates(query: str, config: dict) -> list:
             print(f"[Error] Falló la búsqueda con Google CSE: {e}")
             
     elif engine == "serpapi":
-        api_key = engine_config.get("serpapi_key", "")
+        # Priorizar variables de entorno (desde el archivo .env)
+        api_key = os.getenv("SERPAPI_KEY") or engine_config.get("serpapi_key", "")
         
-        if not api_key or api_key == "YOUR_SERPAPI_KEY":
-            print("[Advertencia] SerpAPI Key no configurada correctamente en config.json.")
+        if not api_key or api_key in ("YOUR_SERPAPI_KEY", "Ver archivo .env", ""):
+            print("[Advertencia] SerpAPI Key no configurada. Configúrala en tu archivo '.env'.")
             return []
             
         url = "https://serpapi.com/search"

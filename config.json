@@ -1,9 +1,9 @@
 {
   "search_engine": {
     "engine": "google_cse",
-    "google_api_key": "YOUR_GOOGLE_API_KEY",
-    "google_cx": "YOUR_GOOGLE_CSE_ID",
-    "serpapi_key": "YOUR_SERPAPI_KEY"
+    "google_api_key": "Ver archivo .env",
+    "google_cx": "Ver archivo .env",
+    "serpapi_key": "Ver archivo .env"
   },
   "ollama": {
     "model": "llama3.1:8b",

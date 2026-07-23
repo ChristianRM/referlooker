@@ -16,10 +16,12 @@ ENV/
 
 # Application outputs and credentials
 cookies.json
+.env
 output/
 procesadas/
 *.xlsx
 *.log
 design_document_referidos.html
 Design_Document_Referidos.pdf
+
 
