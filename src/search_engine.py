@@ -10,15 +10,16 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict)
     Sirve como mecanismo de contingencia si Google CSE falla con errores 403 o límites de cuota.
     """
     urls = []
-    # Usar headless de la configuración de scraping
-    headless = config.get("scraping", {}).get("headless", True)
-    
-    print(f"[Fallback] Iniciando búsqueda directa en Google con Playwright en modo headless={headless}...")
+    # Forzar headless=False para la búsqueda en Google para evitar la detección automática de bots y permitir resolver CAPTCHAs
+    print(f"[Fallback] Iniciando búsqueda directa en Google con Playwright en modo visible (headless=False)...")
     
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context()
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 720}
+            )
             page = context.new_page()
             
             # Formatear la consulta de búsqueda para Google
