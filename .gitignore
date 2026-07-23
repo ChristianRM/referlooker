@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Project configurations
+.vscode/
+.idea/
+
+# Application outputs and credentials
+cookies.json
+output/
+*.xlsx
+*.log
+design_document_referidos.html
+Design_Document_Referidos.pdf

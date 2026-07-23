@@ -1,0 +1,333 @@
+import html
+from weasyprint import HTML
+
+html_content = """<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Design Document: Sistema Automatizado de Referidos de Empleo</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 18mm 15mm 18mm 15mm;
+            background-color: #fcfcfd;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.5;
+            color: #2d3748;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Header Header Banner */
+        .header-container {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: #ffffff;
+            margin: -18mm -15mm 20px -15mm;
+            padding: 25px 20px 20px 20px;
+            border-bottom: 4px solid #3b82f6;
+        }
+
+        .header-title {
+            font-size: 18pt;
+            font-weight: 700;
+            margin: 0 0 6px 0;
+            letter-spacing: -0.5px;
+            color: #ffffff;
+        }
+
+        .header-subtitle {
+            font-size: 11pt;
+            color: #94a3b8;
+            margin: 0;
+            font-weight: 400;
+        }
+
+        .meta-grid {
+            margin-top: 15px;
+            padding-top: 12px;
+            border-top: 1px solid #334155;
+            display: table;
+            width: 100%;
+        }
+
+        .meta-item {
+            display: table-cell;
+            font-size: 8.5pt;
+            color: #cbd5e1;
+        }
+
+        .meta-item strong {
+            color: #38bdf8;
+        }
+
+        /* Headings */
+        h2 {
+            font-size: 13pt;
+            color: #0f172a;
+            margin: 20px 0 10px 0;
+            padding-left: 10px;
+            border-left: 4px solid #2563eb;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            font-size: 11pt;
+            color: #1e293b;
+            margin: 14px 0 6px 0;
+            page-break-after: avoid;
+        }
+
+        p {
+            margin: 0 0 10px 0;
+            text-align: justify;
+        }
+
+        /* Layout Blocks & Cards */
+        .card {
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+        }
+
+        .highlight-box {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 10px 14px;
+            margin: 12px 0;
+            border-radius: 0 6px 6px 0;
+            font-size: 9.5pt;
+        }
+
+        /* Code & Pre */
+        pre {
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 12px 15px;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 8.5pt;
+            line-height: 1.4;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        code {
+            font-family: 'Consolas', 'Courier New', monospace;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-size: 9pt;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 8.5pt;
+            background-color: #ffffff;
+        }
+
+        th {
+            background-color: #1e293b;
+            color: #ffffff;
+            text-align: left;
+            padding: 8px 10px;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: top;
+        }
+
+        tr:nth-child(even) td {
+            background-color: #f8fafc;
+        }
+
+        /* Lists */
+        ul, ol {
+            margin: 0 0 10px 0;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 4px;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 7.5pt;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-green {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .badge-blue {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        /* Step List */
+        .step-block {
+            margin-bottom: 12px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px 14px;
+        }
+
+        .step-header {
+            font-weight: 600;
+            color: #2563eb;
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header-container">
+        <div class="header-title">Design Document: Sistema Automatizado de Referidos de Empleo</div>
+        <div class="header-subtitle">Arquitectura Local de Sourcing, Screening con Ollama (GPU RTX 5070) y Generación de Reportes</div>
+        <div class="meta-grid">
+            <div class="meta-item"><strong>Hardware:</strong> NVIDIA RTX 5070 (Ollama Local)</div>
+            <div class="meta-item"><strong>Output Format:</strong> Excel (.xlsx) / Text (.txt)</div>
+            <div class="meta-item"><strong>Estrategia:</strong> Sourcing X-Ray + OpenToWork</div>
+        </div>
+    </div>
+
+    <h2>1. Visión General del Sistema</h2>
+    <p>El objetivo principal es ejecutar un sistema de reclutamiento y sourcing <strong>100% automatizado y desatendido</strong>. La máquina trabajará en segundo plano procesando las descripciones de vacantes guardadas en texto plano, ejecutando búsquedas X-Ray dirigidas a candidatos activos (<em>Open to Work</em>), extrayendo sus perfiles y evaluándolos mediante un LLM local corriendo sobre la GPU local.</p>
+    
+    <div class="highlight-box">
+        <strong>Estrategia de interacción mínima:</strong> Tú solo agregas los archivos <code>.txt</code> con las vacantes en una carpeta de entrada y dejas la PC corriendo. Al finalizar, revisas un único reporte en Excel/TXT con los mejores perfiles filtrados para realizar la conexión directa en LinkedIn.
+    </div>
+
+    <h2>2. Arquitectura de Archivos y Carpetas</h2>
+    <p>Estructura modular diseñada para permitir una rotación rápida de vacantes sin tocar el código fuente:</p>
+
+    <pre>referral_bot/
+│
+├── config.json                     # API keys (Google Search), límites y parámetros
+├── vacantes/                       # CARPETA DE ENTRADA (Archivos .txt con descripciones)
+│   ├── backend_sr.txt
+│   └── data_engineer_usa.txt
+│
+├── procesadas/                     # HISTÓRICO DE VACANTES (Se mueven las ya procesadas)
+│   └── vacantes_viejas/
+│
+├── output/                         # CARPETA DE SALIDA (Resultados consolidados)
+│   ├── candidatos_deseables.xlsx   # Reporte principal para revisión
+│   └── candidatos_deseables.txt    # Versión simplificada en texto plano
+│
+└── src/                            # CÓDIGO FUENTE
+    ├── main.py                     # Orquestador principal
+    ├── query_generator.py          # Generador de dorks X-Ray
+    ├── search_engine.py            # Cliente de Google Custom Search API / SerpAPI
+    ├── linkedin_scraper.py         # Extractor de perfiles (Playwright headless)
+    └── evaluator.py                # Cliente de Ollama (qwen2.5:14b / llama3.1:8b)</pre>
+
+    <h2>3. Flujo de Trabajo Detallado</h2>
+
+    <div class="step-block">
+        <div class="step-header">Paso 1: Carga y Generación de Consultas X-Ray</div>
+        <p>El script lee cada archivo <code>.txt</code> en la carpeta <code>vacantes/</code> y utiliza el LLM para extraer keywords clave (puesto, experiencia, tecnologías). Construye dorks de búsqueda Google dirigidos:</p>
+        <code>site:linkedin.com/in/ "open to work" "Senior Backend" ("Python" OR "FastAPI")</code>
+    </div>
+
+    <div class="step-block">
+        <div class="step-header">Paso 2: Búsqueda y Filtrado de Resultados</div>
+        <p>Para evitar bloqueos y CAPTCHAs, la búsqueda se ejecuta usando <strong>Google Custom Search API</strong> (o SerpAPI) en lugar de scrapers directos sobre Google. Se filtran estrictamente URLs únicas de perfiles personales de LinkedIn (<code>/in/</code>).</p>
+    </div>
+
+    <div class="step-block">
+        <div class="step-header">Paso 3: Extracción de Datos del Perfil</div>
+        <p>Utilizando <strong>Playwright</strong> en modo headless con cookies de sesión reutilizables, el script visita las páginas públicas y recopila: Titular, Extracto (About), Experiencia laboral reciente y Sección de Habilidades.</p>
+    </div>
+
+    <div class="step-block">
+        <div class="step-header">Paso 4: Evaluación de Match con IA Local (RTX 5070)</div>
+        <p>El perfil y la vacante se envían al modelo local vía Ollama (ej. <code>qwen2.5:14b</code>). El modelo calcula un porcentaje de match, valida la condición <em>OpenToWork</em> y genera un breve resumen de fortalezas y brechas.</p>
+    </div>
+
+    <div class="step-block">
+        <div class="step-header">Paso 5: Consolidador de Reportes</div>
+        <p>Los perfiles con un score superior al 80% se registran en <code>output/candidatos_deseables.xlsx</code> y <code>candidatos_deseables.txt</code>, ordenados por vacante y puntuación.</p>
+    </div>
+
+    <h2>4. Estructura del Reporte Resultante (Excel / TXT)</h2>
+    <p>Ejemplo del formato consolidado que genera el script para revisión humana rápida:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Vacante Asociada</th>
+                <th>Candidato / Titular</th>
+                <th>Score</th>
+                <th>Resumen de Evaluación (LLM)</th>
+                <th>URL LinkedIn</th>
+                <th>Estado</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>backend_sr.txt</code></td>
+                <td>Juan Pérez | Sr Python Dev</td>
+                <td><span class="badge badge-green">94%</span></td>
+                <td>Excelente fit. 6 YOE en Python/FastAPI. Indicador OpenToWork activo.</td>
+                <td>linkedin.com/in/juanperez</td>
+                <td><span class="badge badge-blue">Pendiente</span></td>
+            </tr>
+            <tr>
+                <td><code>data_engineer_usa.txt</code></td>
+                <td>Maria Gomez | Lead Data Eng</td>
+                <td><span class="badge badge-green">88%</span></td>
+                <td>Fuerte dominio de Spark y Snowflake. Experiencia trabajando con equipos de USA.</td>
+                <td>linkedin.com/in/mariagomez</td>
+                <td><span class="badge badge-blue">Pendiente</span></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>5. Manual de Operación y Rotación de Vacantes</h2>
+    <ol>
+        <li><strong>Ejecución Desatendida:</strong> Inicias <code>python main.py</code> antes de salir o ausentarte de la PC. La GPU procesará todo en segundo plano.</li>
+        <li><strong>Revisión de Resultados:</strong> Al regresar, abres <code>candidatos_deseables.xlsx</code>.</li>
+        <li><strong>Contacto Directo:</strong> Abres los links de los candidatos seleccionados en LinkedIn y envías solicitud de conexión personalizada:
+            <div class="highlight-box">
+                <em>"Hola [Nombre], vi tu perfil y coincide muy bien con una posición de [Puesto] en mi empresa. Me gustaría conectarte directamente en nuestro portal de referidos si estás abierto a explorar oportunidades."</em>
+            </div>
+        </li>
+        <li><strong>Recopilación de Datos & Referido:</strong> Cuando el candidato acepte y responda, solicitas su correo y teléfono para cargarlo en el portal de la empresa y asegurar la comisión ($8k – $17k MXN).</li>
+        <li><strong>Rotación de Vacantes:</strong> Una vez enviadas las invitaciones de una vacante, mueves su archivo <code>.txt</code> a la carpeta <code>procesadas/vacantes_viejas/</code> y colocas las nuevas vacantes en <code>vacantes/</code> para la siguiente corrida.</li>
+    </ol>
+
+</body>
+</html>
+"""
+
+with open("design_document_referidos.html", "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+HTML("design_document_referidos.html").write_pdf("Design_Document_Referidos.pdf")
+print("PDF_GENERATED")
