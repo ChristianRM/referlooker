@@ -26,12 +26,8 @@ def main():
         
         input("Presiona ENTER cuando hayas iniciado sesión...")
         
-        # Extraemos las cookies del contexto actual
-        cookies = context.cookies()
-        
-        # Guardamos las cookies en el archivo json
-        with open(cookies_path, "w", encoding="utf-8") as f:
-            json.dump(cookies, f, indent=2, ensure_ascii=False)
+        # Guardar el estado de almacenamiento completo (cookies + local storage)
+        context.storage_state(path=cookies_path)
             
         print(f"\n[Éxito] Sesión guardada exitosamente en: {os.path.abspath(cookies_path)}")
         browser.close()
