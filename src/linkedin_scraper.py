@@ -67,9 +67,14 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
             
             # Navegar a la página del perfil con un tiempo de espera de 30 segundos
             page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
-            
-            # Esperar un momento a que terminen de cargar los elementos dinámicos
-            time.sleep(4)
+            # Esperar a que cargue el elemento h1 (nombre del perfil) en el DOM
+            try:
+                page.wait_for_selector("h1", timeout=10000)
+            except Exception:
+                pass
+                
+            # Dar un margen de 2 segundos para permitir que carguen las secciones dinámicas (About, Experience)
+            page.wait_for_timeout(2000)
             
             current_url = page.url
             # Comprobar si LinkedIn nos redirigió a la página de login o desafío de seguridad
