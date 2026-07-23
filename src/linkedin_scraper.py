@@ -50,14 +50,9 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
     
     with sync_playwright() as p:
         try:
-            # Lanzamos Chromium
+            # Lanzamos Chromium cargando el estado de almacenamiento guardado (cookies + session/local storage)
             browser = p.chromium.launch(headless=headless)
-            context = browser.new_context()
-            
-            # Cargar cookies de sesión
-            with open(cookies_path, "r", encoding="utf-8") as f:
-                cookies = json.load(f)
-            context.add_cookies(cookies)
+            context = browser.new_context(storage_state=cookies_path)
             
             page = context.new_page()
             # Configurar un User-Agent realista para evitar bloqueos
