@@ -39,10 +39,10 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict)
                 # Esperar hasta 2 minutos a que la URL ya no sea la de CAPTCHA
                 try:
                     for _ in range(120):
+                        page.wait_for_timeout(1000) # Permitir que Playwright procese eventos y actualice la URL
                         if "google.com/sorry" not in page.url:
                             print("[Éxito] CAPTCHA resuelto. Continuando con la extracción...")
                             break
-                        time.sleep(1)
                 except Exception:
                     pass
             
@@ -51,7 +51,7 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict)
                 page.wait_for_selector("#search", timeout=5000)
             except Exception:
                 # Fallback por si no renderiza pero hay enlaces
-                time.sleep(2)
+                page.wait_for_timeout(2000)
             
             # Extraer todas las URLs de los enlaces (a) que correspondan a perfiles de LinkedIn
             hrefs = page.eval_on_selector_all("a", "elements => elements.map(el => el.href)")
