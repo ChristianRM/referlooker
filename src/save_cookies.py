@@ -10,7 +10,9 @@ def main():
     with sync_playwright() as p:
         # Abrimos el navegador en modo visible (headless=False) para permitir la interacción del usuario
         browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
         
         print("Navegando a la página de inicio de sesión de LinkedIn...")
