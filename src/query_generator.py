@@ -45,7 +45,7 @@ Debes devolver obligatoriamente un objeto JSON válido (y NADA más, sin introdu
 }}
 
 Reglas para construir el "search_query":
-1. Usa `site:linkedin.com/in/` para buscar perfiles individuales de personas.
+1. Comienza la consulta OBLIGATORIAMENTE con `site:linkedin.com/in/` de forma directa, sin colocarle paréntesis alrededor. Por ejemplo, escribe `site:linkedin.com/in/ ("open to work" ...)` y NUNCA `(site:linkedin.com/in/)`.
 2. Incluye variantes comunes de búsqueda activa de empleo como `("open to work" OR "open to opportunities" OR "búsqueda activa")`.
 3. Incluye el rol principal (ej: `("Backend Developer" OR "Backend Engineer")`).
 4. Agrega tecnologías indispensables usando operadores booleanos (ej: `("Django" OR "FastAPI")`).
