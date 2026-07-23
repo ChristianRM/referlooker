@@ -1,6 +1,49 @@
 import os
+import time
 import requests
 import urllib.parse
+from playwright.sync_api import sync_playwright
+
+def search_candidates_via_playwright(query: str, max_results: int, config: dict) -> list:
+    """
+    Busca directamente en Google usando Playwright sin requerir llaves de API externas.
+    Sirve como mecanismo de contingencia si Google CSE falla con errores 403 o límites de cuota.
+    """
+    urls = []
+    # Usar headless de la configuración de scraping
+    headless = config.get("scraping", {}).get("headless", True)
+    
+    print(f"[Fallback] Iniciando búsqueda directa en Google con Playwright en modo headless={headless}...")
+    
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(headless=headless)
+            context = browser.new_context()
+            page = context.new_page()
+            
+            # Formatear la consulta de búsqueda para Google
+            encoded_query = urllib.parse.quote(query)
+            google_url = f"https://www.google.com/search?q={encoded_query}"
+            
+            page.goto(google_url, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(4) # Esperar a que carguen todos los resultados de Google
+            
+            # Extraer todas las URLs de los enlaces (a) que correspondan a perfiles de LinkedIn
+            hrefs = page.eval_on_selector_all("a", "elements => elements.map(el => el.href)")
+            
+            for href in hrefs:
+                cleaned = clean_linkedin_url(href)
+                if cleaned:
+                    urls.append(cleaned)
+                    if len(urls) >= max_results:
+                        break
+                        
+            browser.close()
+        except Exception as e:
+            print(f"[Error Fallback] Falló la búsqueda directa en Google: {e}")
+            
+    return urls
+
 
 def load_dotenv(dotenv_path=".env"):
     """
@@ -60,6 +103,9 @@ def search_candidates(query: str, config: dict) -> list:
     
     print(f"Iniciando búsqueda usando motor '{engine}' con query: {query}")
     
+    if engine in ("google_playwright", "direct"):
+        return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config)))
+        
     if engine == "google_cse":
         # Priorizar variables de entorno (desde el archivo .env)
         api_key = os.getenv("GOOGLE_API_KEY") or engine_config.get("google_api_key", "")
@@ -67,7 +113,8 @@ def search_candidates(query: str, config: dict) -> list:
         
         if not api_key or not cx or api_key in ("YOUR_GOOGLE_API_KEY", "Ver archivo .env", "") or cx in ("YOUR_GOOGLE_CSE_ID", "Ver archivo .env", ""):
             print("[Advertencia] Google Custom Search API Key o CX no configurados. Configúralos en tu archivo '.env'.")
-            return []
+            print("[Advertencia] Activando búsqueda de contingencia vía Playwright...")
+            return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config)))
             
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
@@ -86,6 +133,11 @@ def search_candidates(query: str, config: dict) -> list:
                     print(f"[Error] Google CSE retornó código {response.status_code}: {error_msg}")
                 except Exception:
                     print(f"[Error] Google CSE retornó código {response.status_code}: {response.text}")
+                
+                # Fallback automático ante error 403 o 400
+                if response.status_code in (400, 403):
+                    print("[Advertencia] Se detectó error en Google CSE. Activando búsqueda alternativa directa vía Playwright...")
+                    return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config)))
                 return []
                 
             response.raise_for_status()
