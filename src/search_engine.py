@@ -27,7 +27,31 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict)
             google_url = f"https://www.google.com/search?q={encoded_query}"
             
             page.goto(google_url, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(4) # Esperar a que carguen todos los resultados de Google
+            
+            # Detectar si Google arrojó un CAPTCHA (redirección a google.com/sorry)
+            if "google.com/sorry" in page.url:
+                print("\n" + "!" * 50)
+                print("[Acción Requerida] Google ha solicitado una verificación humana (CAPTCHA).")
+                print("Por favor, resuélvelo en la ventana del navegador que se acaba de abrir.")
+                print("El script esperará a que lo completes para continuar automáticamente...")
+                print("!" * 50 + "\n")
+                
+                # Esperar hasta 2 minutos a que la URL ya no sea la de CAPTCHA
+                try:
+                    for _ in range(120):
+                        if "google.com/sorry" not in page.url:
+                            print("[Éxito] CAPTCHA resuelto. Continuando con la extracción...")
+                            break
+                        time.sleep(1)
+                except Exception:
+                    pass
+            
+            # Esperar a que el contenedor de resultados de Google (#search) se renderice
+            try:
+                page.wait_for_selector("#search", timeout=5000)
+            except Exception:
+                # Fallback por si no renderiza pero hay enlaces
+                time.sleep(2)
             
             # Extraer todas las URLs de los enlaces (a) que correspondan a perfiles de LinkedIn
             hrefs = page.eval_on_selector_all("a", "elements => elements.map(el => el.href)")
