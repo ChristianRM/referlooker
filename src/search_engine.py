@@ -79,6 +79,15 @@ def search_candidates(query: str, config: dict) -> list:
         
         try:
             response = requests.get(url, params=params, timeout=15)
+            if response.status_code != 200:
+                try:
+                    error_json = response.json()
+                    error_msg = error_json.get("error", {}).get("message", "Sin mensaje detallado")
+                    print(f"[Error] Google CSE retornó código {response.status_code}: {error_msg}")
+                except Exception:
+                    print(f"[Error] Google CSE retornó código {response.status_code}: {response.text}")
+                return []
+                
             response.raise_for_status()
             data = response.json()
             items = data.get("items", [])
