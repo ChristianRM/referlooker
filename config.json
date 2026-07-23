@@ -1,0 +1,22 @@
+{
+  "search_engine": {
+    "engine": "google_cse",
+    "google_api_key": "YOUR_GOOGLE_API_KEY",
+    "google_cx": "YOUR_GOOGLE_CSE_ID",
+    "serpapi_key": "YOUR_SERPAPI_KEY"
+  },
+  "ollama": {
+    "model": "llama3.1:8b",
+    "host": "http://localhost:11434"
+  },
+  "search_limits": {
+    "max_results_per_vacancy": 5
+  },
+  "evaluation": {
+    "min_score": 80
+  },
+  "scraping": {
+    "headless": true,
+    "cookies_path": "cookies.json"
+  }
+}
