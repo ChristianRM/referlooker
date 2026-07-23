@@ -172,6 +172,10 @@ def main():
         print("Buscando perfiles en Google...")
         candidate_urls = search_candidates(query, config)
         
+        if not candidate_urls:
+            print(f"[Advertencia] No se encontraron perfiles de LinkedIn para la vacante '{vac_file}' (búsqueda vacía o configuración/llaves incorrectas). Se mantendrá en 'vacantes/' para reintentar.")
+            continue
+            
         # 3. Scrapear y evaluar candidatos
         for url in candidate_urls:
             # Evitar reprocesar candidatos ya evaluados para esta vacante
