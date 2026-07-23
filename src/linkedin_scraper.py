@@ -50,15 +50,13 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
     
     with sync_playwright() as p:
         try:
-            # Lanzamos Chromium cargando el estado de almacenamiento guardado (cookies + session/local storage)
+            # Lanzamos Chromium cargando el estado de almacenamiento guardado con el mismo User-Agent
             browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(storage_state=cookies_path)
-            
+            context = browser.new_context(
+                storage_state=cookies_path,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
             page = context.new_page()
-            # Configurar un User-Agent realista para evitar bloqueos
-            page.set_extra_http_headers({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            })
             
             # Navegar a la página del perfil con un tiempo de espera de 30 segundos
             page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
@@ -155,11 +153,11 @@ def ensure_linkedin_session(config: dict):
             try:
                 # Corremos en headless para verificar en segundo plano de forma silenciosa
                 browser = p.chromium.launch(headless=True)
-                context = browser.new_context(storage_state=cookies_path)
+                context = browser.new_context(
+                    storage_state=cookies_path,
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
                 page = context.new_page()
-                page.set_extra_http_headers({
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                })
                 
                 # Ir a la página de feed que requiere autenticación
                 page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=25000)
@@ -186,7 +184,9 @@ def ensure_linkedin_session(config: dict):
         with sync_playwright() as p:
             try:
                 browser = p.chromium.launch(headless=False)
-                context = browser.new_context()
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
                 page = context.new_page()
                 
                 print("Navegando a la página de inicio de sesión de LinkedIn...")
