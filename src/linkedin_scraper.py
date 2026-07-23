@@ -139,3 +139,73 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
             profile_data["status"] = "error"
             
     return profile_data
+
+def ensure_linkedin_session(config: dict):
+    """
+    Verifica de forma automática si existe una sesión válida de LinkedIn.
+    Si no existe o si ha expirado, abre una ventana de Chrome visible para que el usuario
+    inicie sesión, guardando el estado de almacenamiento antes de proceder.
+    """
+    cookies_path = config.get("scraping", {}).get("cookies_path", "cookies.json")
+    session_valid = False
+    
+    if os.path.exists(cookies_path):
+        print("Verificando si tu sesión de LinkedIn sigue activa...")
+        with sync_playwright() as p:
+            try:
+                # Corremos en headless para verificar en segundo plano de forma silenciosa
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(storage_state=cookies_path)
+                page = context.new_page()
+                page.set_extra_http_headers({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                })
+                
+                # Ir a la página de feed que requiere autenticación
+                page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=25000)
+                page.wait_for_timeout(3000)
+                
+                # Comprobar la URL y que no nos mande al login wall
+                body_text = page.locator("body").inner_text().lower()
+                if "linkedin.com/feed" in page.url and "join linkedin" not in body_text and "iniciar sesión" not in body_text:
+                    session_valid = True
+                    print("[Sesión] Tu sesión de LinkedIn está ACTIVA y es válida.")
+                else:
+                    print("[Sesión] Sesión de LinkedIn EXPIRADA o no válida.")
+                browser.close()
+            except Exception as e:
+                print(f"[Sesión] Error comprobando sesión: {e}")
+                
+    if not session_valid:
+        print("\n" + "=" * 70)
+        print("[SESIÓN DE LINKEDIN REQUERIDA]")
+        print("No se encontró una sesión activa de LinkedIn en tu equipo.")
+        print("Se abrirá una ventana de Chrome para que inicies sesión manualmente.")
+        print("=" * 70 + "\n")
+        
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch(headless=False)
+                context = browser.new_context()
+                page = context.new_page()
+                
+                print("Navegando a la página de inicio de sesión de LinkedIn...")
+                page.goto("https://www.linkedin.com/login")
+                
+                print("\n" + "=" * 70)
+                print("INSTRUCCIONES:")
+                print("1. Inicia sesión en tu cuenta en la ventana de Chrome.")
+                print("2. Resuelve cualquier verificación (MFA o CAPTCHA) si aparece.")
+                print("3. Una vez que cargue tu página principal (Feed), regresa aquí.")
+                print("4. Presiona ENTER en esta terminal para continuar.")
+                print("=" * 70 + "\n")
+                
+                input("Presiona ENTER cuando estés listo...")
+                
+                # Guardar estado de almacenamiento completo (cookies + local storage)
+                context.storage_state(path=cookies_path)
+                print(f"\n[Éxito] Sesión de LinkedIn iniciada y guardada en {cookies_path}")
+                browser.close()
+            except Exception as e:
+                print(f"[Error] Falló la autenticación asistida: {e}")
+
