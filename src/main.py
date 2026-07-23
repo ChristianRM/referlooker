@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from query_generator import generate_search_query
 from search_engine import search_candidates
-from linkedin_scraper import scrape_linkedin_profile
+from linkedin_scraper import scrape_linkedin_profile, ensure_linkedin_session
 from evaluator import evaluate_candidate
 
 def load_config():
@@ -176,7 +176,11 @@ def main():
             print(f"[Advertencia] No se encontraron perfiles de LinkedIn para la vacante '{vac_file}' (búsqueda vacía o configuración/llaves incorrectas). Se mantendrá en 'vacantes/' para reintentar.")
             continue
             
-        # 3. Scrapear y evaluar candidatos
+        # 3. Asegurar que la sesión de LinkedIn esté iniciada (asistiendo de forma visible si expiró)
+        if any(url not in processed_history for url in candidate_urls):
+            ensure_linkedin_session(config)
+            
+        # 4. Scrapear y evaluar candidatos
         for url in candidate_urls:
             # Evitar reprocesar candidatos ya evaluados para esta vacante
             if url in processed_history:
