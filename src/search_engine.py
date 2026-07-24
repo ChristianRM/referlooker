@@ -4,14 +4,14 @@ import requests
 import urllib.parse
 from playwright.sync_api import sync_playwright
 
-def search_candidates_via_playwright(query: str, max_results: int, config: dict) -> list:
+def search_candidates_via_playwright(query: str, max_results: int, config: dict, start_offset: int = 0) -> list:
     """
     Busca directamente en Google usando Playwright sin requerir llaves de API externas.
     Sirve como mecanismo de contingencia si Google CSE falla con errores 403 o límites de cuota.
     """
     urls = []
     # Forzar headless=False para la búsqueda en Google para evitar la detección automática de bots y permitir resolver CAPTCHAs
-    print(f"[Fallback] Iniciando búsqueda directa en Google con Playwright en modo visible (headless=False)...")
+    print(f"[Fallback] Iniciando búsqueda directa en Google con Playwright en modo visible (headless=False) en offset {start_offset}...")
     
     with sync_playwright() as p:
         try:
@@ -24,7 +24,7 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict)
             
             # Formatear la consulta de búsqueda para Google
             encoded_query = urllib.parse.quote(query)
-            google_url = f"https://www.google.com/search?q={encoded_query}"
+            google_url = f"https://www.google.com/search?q={encoded_query}&start={start_offset}"
             
             page.goto(google_url, wait_until="domcontentloaded", timeout=30000)
             
@@ -115,7 +115,7 @@ def clean_linkedin_url(url: str) -> str:
         pass
     return ""
 
-def search_candidates(query: str, config: dict) -> list:
+def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
     """
     Ejecuta la consulta de búsqueda en Google a través de Google Custom Search o SerpAPI.
     Retorna una lista de URLs únicas de perfiles de LinkedIn.
@@ -126,10 +126,10 @@ def search_candidates(query: str, config: dict) -> list:
     
     urls = []
     
-    print(f"Iniciando búsqueda usando motor '{engine}' con query: {query}")
+    print(f"Iniciando búsqueda usando motor '{engine}' con query: {query} (offset: {start_offset})")
     
     if engine in ("google_playwright", "direct"):
-        return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config)))
+        return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
         
     if engine == "google_cse":
         # Priorizar variables de entorno (desde el archivo .env)
@@ -139,7 +139,7 @@ def search_candidates(query: str, config: dict) -> list:
         if not api_key or not cx or api_key in ("YOUR_GOOGLE_API_KEY", "Ver archivo .env", "") or cx in ("YOUR_GOOGLE_CSE_ID", "Ver archivo .env", ""):
             print("[Advertencia] Google Custom Search API Key o CX no configurados. Configúralos en tu archivo '.env'.")
             print("[Advertencia] Activando búsqueda de contingencia vía Playwright...")
-            return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config)))
+            return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
             
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
@@ -148,7 +148,9 @@ def search_candidates(query: str, config: dict) -> list:
             "q": query,
             "num": max_results
         }
-        
+        if start_offset > 0:
+            params["start"] = start_offset + 1
+            
         try:
             response = requests.get(url, params=params, timeout=15)
             if response.status_code != 200:
@@ -162,7 +164,7 @@ def search_candidates(query: str, config: dict) -> list:
                 # Fallback automático ante error 403 o 400
                 if response.status_code in (400, 403):
                     print("[Advertencia] Se detectó error en Google CSE. Activando búsqueda alternativa directa vía Playwright...")
-                    return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config)))
+                    return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
                 return []
                 
             response.raise_for_status()
@@ -191,7 +193,9 @@ def search_candidates(query: str, config: dict) -> list:
             "api_key": api_key,
             "num": max_results
         }
-        
+        if start_offset > 0:
+            params["start"] = start_offset
+            
         try:
             response = requests.get(url, params=params, timeout=15)
             response.raise_for_status()
