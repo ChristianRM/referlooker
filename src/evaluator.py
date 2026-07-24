@@ -122,10 +122,10 @@ Responde ÚNICAMENTE con el objeto JSON.
             "resumen_evaluacion": f"Error al procesar la evaluación con el modelo: {e}"
         }
 
-def evaluate_location_with_llm(candidate_location: str, target_country: str, config: dict) -> bool:
+def evaluate_location_with_llm(header_text: str, target_country: str, config: dict) -> dict:
     """
-    Pregunta a Ollama si la ubicación del candidato es compatible con la requerida por la vacante.
-    Si la vacante no especifica país (Any/Remote), los países permitidos por defecto son México y Estados Unidos.
+    Pregunta a Ollama si la ubicación del candidato es compatible con la requerida.
+    Devuelve un diccionario con 'compatible' (bool) y 'extracted_location' (str).
     """
     model_name = config.get("ollama", {}).get("model", "llama3.1:8b")
     ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
@@ -134,16 +134,28 @@ def evaluate_location_with_llm(candidate_location: str, target_country: str, con
     required = target_country if target_country.lower() not in ("any", "global", "remoto", "remote", "") else "Mexico o United States"
     
     prompt = f"""
-    País/Ubicación Requerido por la Vacante: "{required}"
-    Ubicación del Candidato en LinkedIn: "{candidate_location}"
+    Eres un asistente de reclutamiento técnico experto en geolocalización.
+    Analiza la información de cabecera del perfil de LinkedIn del candidato y determina su ubicación.
     
-    Tu tarea es determinar si el candidato reside actualmente en el mismo país requerido por la vacante.
-    Reglas:
-    1. Si la ubicación requerida es "Mexico o United States", el candidato debe residir en México o en Estados Unidos. Si reside en cualquier otro país (como Colombia, España, India, etc.), es incompatible.
-    2. Si el candidato está en el país requerido, responde únicamente "YES".
-    3. Si el candidato está en un país diferente al requerido, responde únicamente "NO".
+    Información de Cabecera del Candidato:
+    \"\"\"
+    {header_text}
+    \"\"\"
     
-    Responde estrictamente con una sola palabra: "YES" o "NO". No agregues explicaciones, puntuación ni otros caracteres.
+    Ubicación Requerida por la Vacante: "{required}"
+    
+    Reglas de decisión:
+    1. Si la ubicación requerida es "Mexico o United States", el candidato debe residir en México o en Estados Unidos. Si reside en cualquier otro país (como Colombia, India, España, Túnez, etc.), es incompatible.
+    2. Identifica el país/ciudad/estado del candidato a partir de la cabecera.
+    
+    Debes devolver obligatoriamente un objeto JSON válido (y NADA más) con el siguiente formato exacto:
+    {{
+      "compatible": true,
+      "extracted_location": "Ubicación del candidato extraída (ej: 'Dallas, Texas, United States' o 'Guadalajara, Jalisco, México')"
+    }}
+    
+    Si el candidato no es compatible con la ubicación requerida, el campo "compatible" debe ser false.
+    Responde ÚNICAMENTE con el objeto JSON.
     """
     
     try:
@@ -152,15 +164,32 @@ def evaluate_location_with_llm(candidate_location: str, target_country: str, con
             prompt=prompt,
             options={"temperature": 0.0} # Temperatura cero para máxima precisión y determinismo
         )
-        ans = response.get("response", "").strip().upper()
-        if "YES" in ans:
-            return True
-        return False
+        response_text = response.get("response", "")
+        cleaned_text = clean_json_response(response_text)
+        data = json.loads(cleaned_text)
+        return {
+            "compatible": bool(data.get("compatible", False)),
+            "extracted_location": data.get("extracted_location", "No detectada")
+        }
     except Exception as e:
         print(f"[Advertencia] Error al evaluar ubicación con Ollama: {e}")
-        # Fallback simple en Python
-        loc_lower = candidate_location.lower()
-        if required == "Mexico o United States":
-            return any(term in loc_lower for term in ["mexic", "méxic", "mx", "united states", "usa", "u.s."])
-        return target_country.lower() in loc_lower
+        # Intento de rescate
+        try:
+            start_idx = response_text.find("{")
+            end_idx = response_text.rfind("}")
+            if start_idx != -1 and end_idx != -1:
+                json_str = response_text[start_idx:end_idx+1]
+                data = json.loads(json_str)
+                return {
+                    "compatible": bool(data.get("compatible", False)),
+                    "extracted_location": data.get("extracted_location", "No detectada")
+                }
+        except Exception:
+            pass
+            
+        # Fallback simple
+        return {
+            "compatible": True,
+            "extracted_location": "Error en extracción (Permitido por fallback)"
+        }
 
