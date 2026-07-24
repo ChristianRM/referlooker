@@ -163,13 +163,13 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
             except Exception:
                 pass
 
-            # Evaluar ubicación primero de forma determinista en Python
-            is_compatible = is_location_compatible(header_text, target_country)
-            
-            # Usar Ollama para extraer el nombre bonito de la ubicación para el reporte
+            # 1. Usar Ollama para extraer el nombre bonito de la ubicación a partir del texto de cabecera
             from evaluator import evaluate_location_with_llm
             res = evaluate_location_with_llm(header_text, target_country, config)
             profile_data["location"] = res.get("extracted_location", "No detectada")
+            
+            # 2. Evaluar de forma determinista en Python la ubicación limpia extraída
+            is_compatible = is_location_compatible(profile_data["location"], target_country)
             
             if not is_compatible:
                 print(f"[Descarte Geográfico] Candidato '{profile_data['name']}' descartado por estar fuera del país (Ubicación detectada: '{profile_data['location']}', Requerido: '{target_country}').")
