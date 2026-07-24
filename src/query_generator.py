@@ -38,12 +38,12 @@ Vacante:
 \"\"\"
 
 Debes devolver obligatoriamente un objeto JSON válido (y NADA más, sin introducciones ni explicaciones) con la siguiente estructura:
-{
+{{
   "role": "Nombre simplificado del puesto (ej: Senior Python Developer)",
   "target_country": "País objetivo de la vacante si se menciona, ej: 'Mexico' o 'United States'. Si no se especifica o es remoto/global, escribe 'Any'",
   "keywords": ["palabra_clave1", "palabra_clave2", ...],
   "search_query": "Consulta de búsqueda X-Ray de Google optimizada"
-}
+}}
 
 Reglas para construir el "search_query":
 1. De forma predeterminada, comienza la consulta con `site:linkedin.com/in/` de forma directa, sin colocarle paréntesis alrededor. Por ejemplo, escribe `site:linkedin.com/in/ ("open to work" ...)` y NUNCA `(site:linkedin.com/in/)`.
