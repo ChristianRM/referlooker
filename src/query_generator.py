@@ -49,8 +49,8 @@ Reglas para construir el "search_query":
 1. De forma predeterminada, comienza la consulta con `site:linkedin.com/in/` de forma directa, sin colocarle paréntesis alrededor. Por ejemplo, escribe `site:linkedin.com/in/ ("open to work" ...)` y NUNCA `(site:linkedin.com/in/)`.
 2. REGLA DE UBICACIÓN REGIONAL: Si la vacante especifica un país de trabajo obligatorio, ajusta el inicio de la consulta para usar el subdominio correspondiente de LinkedIn (por ejemplo, si es en México, usa `site:mx.linkedin.com/in/`. Si es en España, usa `site:es.linkedin.com/in/`. Si es en Estados Unidos o global, usa `site:linkedin.com/in/` e incluye el país o región en la consulta de búsqueda, por ejemplo: `AND ("United States" OR "USA")`).
 3. Incluye variantes comunes de búsqueda activa de empleo como `("open to work" OR "open to opportunities" OR "búsqueda activa")`.
-4. Incluye el rol principal (ej: `("Backend Developer" OR "Backend Engineer")`).
-5. Agrega tecnologías indispensables usando operadores booleanos (ej: `("Django" OR "FastAPI")`).
+4. Incluye el rol principal simplificado. Utiliza nombres de puestos genéricos y muy comunes en la industria (ej: `("AWS Architect" OR "Cloud Engineer" OR "DevOps")`). NUNCA utilices nombres de proyectos internos, herramientas ultra-específicas o siglas propietarias de la empresa vacante (ej: NUNCA uses 'AgentCore', 'IRC292142', etc.) ya que ningún candidato las tendrá en su titular.
+5. Agrega solo 1 o 2 tecnologías indispensables usando operadores booleanos (ej: `("Terraform" OR "Kubernetes")`). Mantén la consulta corta y simple; si agregas demasiados operadores AND obligatorios, el buscador de Google retornará cero resultados. Es mejor una búsqueda amplia y dejar que el evaluador filtre los detalles finos.
 6. Evita comillas innecesarias o consultas demasiado largas que rompan el buscador.
 
 Responde ÚNICAMENTE con el objeto JSON.
