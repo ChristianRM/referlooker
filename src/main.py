@@ -140,43 +140,51 @@ def update_excel_report(candidate_info: dict, excel_path: str):
 
 def is_location_compatible(candidate_text: str, target_country: str) -> bool:
     """
-    Verifica de forma rápida si el candidato está en el país objetivo de la vacante.
-    Retorna True si es compatible o si no se especificó país.
-    Retorna False si el candidato está en un país incompatible.
+    Verifica si el candidato está en el país objetivo de la vacante.
+    Si la vacante no especifica país (o es Any/Remoto), el candidato de forma obligatoria
+    debe residir en México o Estados Unidos. Si reside fuera, se descarta.
     """
-    if not target_country or target_country.lower() in ("any", "global", "remoto", "remote", ""):
-        return True
-        
     candidate_text_lower = candidate_text.lower()
-    target_lower = target_country.lower()
     
-    # Mapear países comunes y sus sinónimos/regiones
-    country_synonyms = {
-        "mexico": ["mexico", "méxico", "mx", "jalisco", "monterrey", "guadalajara", "cdmx", "queretaro", "querétaro", "nl", "nuevo leon"],
-        "united states": ["united states", "usa", "u.s.", "america", "chicago", "new york", "texas", "california", "florida", "austin", "seattle", "illinois", "boston"],
-        "spain": ["spain", "españa", "es", "madrid", "barcelona", "valencia"]
-    }
+    # Términos comunes y subregiones para México y Estados Unidos
+    mexico_terms = ["mexico", "méxico", "mx", "jalisco", "monterrey", "guadalajara", "cdmx", "queretaro", "querétaro", "nl", "nuevo leon", "ciudad de méxico", "sinaloa", "puebla", "yucatan", "yucatán", "veracruz", "guanajuato", "chihuahua", "sonora"]
+    us_terms = ["united states", "usa", "u.s.", "america", "chicago", "new york", "texas", "california", "florida", "austin", "seattle", "illinois", "boston", "denver", "atlanta", "dallas", "houston", "miami", "san francisco", "los angeles"]
     
-    # Obtener lista de términos válidos para el país objetivo
-    valid_terms = country_synonyms.get(target_lower, [target_lower])
+    # 1. Si la vacante requiere un país específico
+    if target_country and target_country.lower() not in ("any", "global", "remoto", "remote", ""):
+        target_lower = target_country.lower()
+        if "mexico" in target_lower or "méxico" in target_lower or target_lower == "mx":
+            return any(term in candidate_text_lower for term in mexico_terms)
+        elif "united states" in target_lower or "usa" in target_lower or target_lower == "us":
+            return any(term in candidate_text_lower for term in us_terms)
+        else:
+            # Si pide otro país específico (ej. España), buscar ese término directamente
+            return target_lower in candidate_text_lower
+            
+    # 2. Si la vacante no especifica país (es Any), el candidato OBLIGATORIAMENTE
+    # debe ser de México o Estados Unidos. Si no es de ninguno de los dos, se descarta.
+    is_mexico = any(term in candidate_text_lower for term in mexico_terms)
+    is_us = any(term in candidate_text_lower for term in us_terms)
     
-    # Comprobar si el texto del candidato menciona el país objetivo o alguno de sus términos representativos
-    has_target_mention = any(term in candidate_text_lower for term in valid_terms)
-    if has_target_mention:
+    if is_mexico or is_us:
+        # Aún si coincide con MX/US, descartamos si menciona explícitamente otros países lejanos como residencia principal
+        other_countries = ["india", "pakistan", "egypt", "tunisia", "bangladesh", "ukraine", "poland", "nigeria", "brazil", "argentina", "colombia", "peru", "venezuela", "chile", "ecuador"]
+        # Filtrar de la lista de descarte los países permitidos
+        other_countries = [c for c in other_countries if c not in ("mexico", "mexic", "méxico", "united states", "usa")]
+        
+        # Si menciona explícitamente a otro país competidor sin menciones de residencia en MX/US, lo descartamos
+        has_other_mention = any(c in candidate_text_lower for c in other_countries)
+        if has_other_mention:
+            # Solo permitir si también tiene mención fuerte de México/USA (como "mexico" o "usa")
+            # Ejemplo: un perfil que diga "Location: India ... moved to USA" se permite,
+            # pero un perfil que diga "Location: Colombia ... worked with US clients" sin residir en US se descarta.
+            has_strong_local = ("mexico" in candidate_text_lower or "méxico" in candidate_text_lower or 
+                                "united states" in candidate_text_lower or "usa" in candidate_text_lower)
+            if not has_strong_local:
+                return False
         return True
         
-    # Si no menciona el país objetivo, pero menciona explícitamente otros países lejanos, lo descartamos
-    other_countries = ["india", "pakistan", "egypt", "tunisia", "bangladesh", "ukraine", "poland", "nigeria", "brazil", "argentina", "colombia"]
-    
-    # Excluir el propio target_country de la lista de descarte
-    other_countries = [c for c in other_countries if c != target_lower and c not in valid_terms]
-    
-    has_other_mention = any(c in candidate_text_lower for c in other_countries)
-    if has_other_mention:
-        return False
-        
-    # Por defecto dejamos pasar para que el LLM evalúe detalles finos
-    return True
+    return False
 
 def main():
     setup_directories()
