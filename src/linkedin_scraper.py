@@ -29,6 +29,7 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
         "url": profile_url,
         "name": "",
         "headline": "",
+        "location": "",
         "about": "",
         "experience": "",
         "skills": "",
@@ -85,6 +86,15 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
                 headline_locator = page.locator(".text-body-medium").first
                 if headline_locator.count() > 0:
                     profile_data["headline"] = headline_locator.inner_text().strip()
+            except Exception:
+                pass
+                
+            # Extraer la ubicación del candidato
+            try:
+                # El elemento con la clase .text-body-small de la cabecera suele tener la ubicación del candidato
+                loc_locator = page.locator("span.text-body-small.inline, .pv-text-details__left-panel .text-body-small").first
+                if loc_locator.count() > 0:
+                    profile_data["location"] = loc_locator.inner_text().strip()
             except Exception:
                 pass
                 
