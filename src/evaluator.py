@@ -144,26 +144,21 @@ def evaluate_location_with_llm(header_text: str, target_country: str, config: di
     {header_text}
     \"\"\"
     
-    REGLAS DE COMPATIBILIDAD GEOGRÁFICA DE OBLIGADO CUMPLIMIENTO:
-    1. Si la "Ubicación Requerida" es "Mexico o United States":
-       - El candidato debe residir físicamente en México o en Estados Unidos.
-       - Si el candidato reside en cualquier otro país (como India, Nigeria, Colombia, España, etc.), "compatible" DEBE ser estrictamente false.
-    2. Si la "Ubicación Requerida" es "Mexico":
-       - El candidato debe residir físicamente en México.
-       - Si el candidato reside en Estados Unidos, India, Nigeria, Colombia, España, etc., "compatible" DEBE ser estrictamente false.
-    3. Si la "Ubicación Requerida" es "United States" (o USA / US):
-       - El candidato debe residir físicamente en Estados Unidos.
-       - Si el candidato reside en México, India, Nigeria, Colombia, España, etc., "compatible" DEBE ser estrictamente false.
-       
-    4. Identifica con precisión la ubicación del candidato a partir de la cabecera provista (ej: 'Lagos, Nigeria', 'Hyderabad, Telangana, India', 'Dallas, Texas, United States', 'Guadalajara, Jalisco, México').
+    Proceso de Razonamiento obligatorio:
+    1. Identifica el país requerido por la vacante (ej: 'United States', 'Mexico', 'Spain', etc.). Si la Ubicación Requerida es "Mexico o United States", los países permitidos son México o Estados Unidos.
+    2. Identifica el país de residencia actual del candidato a partir de su cabecera (ej: 'Mexico', 'Spain', 'Nigeria', 'India', etc.).
+    3. Compara si el país del candidato coincide exactamente con el país requerido por la vacante (o si es México/EE.UU. en caso de la regla por defecto).
+    4. Si los países no coinciden (ej: candidato está en México o España pero la vacante requiere 'United States'), el valor de "compatible" DEBE ser obligatoriamente false.
     
-    Debes responder OBLIGATORIAMENTE con un objeto JSON válido (y absolutamente NADA más, sin comentarios, sin explicaciones, sin texto libre) que tenga este formato exacto:
+    Debes devolver OBLIGATORIAMENTE un objeto JSON válido (y absolutamente NADA más, sin comentarios, sin explicaciones, sin texto libre) que tenga este formato exacto:
     {{
+      "pais_vacante": "País requerido por la vacante (ej: 'United States')",
+      "pais_candidato": "País de residencia del candidato (ej: 'Mexico' o 'Spain')",
       "compatible": false,
-      "extracted_location": "Ubicación del candidato extraída (ej: 'Lagos, Nigeria' o 'Detroit, Michigan, USA')"
+      "extracted_location": "Ubicación completa del candidato extraída (ej: 'Lagos, Nigeria' o 'Hermosillo, Sonora, Mexico')"
     }}
     
-    Reemplaza el valor de "compatible" con true si es compatible con el país requerido, o false si no es compatible con el país requerido.
+    Reemplaza "compatible" con true si son del mismo país/región permitida, o false si están en países distintos.
     Responde ÚNICAMENTE con el objeto JSON.
     """
     
