@@ -32,7 +32,11 @@ def evaluate_candidate(profile_data: dict, vacancy_text: str, config: dict) -> d
 URL: {profile_data.get('url')}
 Nombre: {profile_data.get('name')}
 Titular: {profile_data.get('headline')}
-
+"""
+    
+    # Si logramos extraer secciones estructuradas las priorizamos, de lo contrario usamos el texto completo del body
+    if profile_data.get('about') or profile_data.get('experience'):
+        profile_summary += f"""
 [Extracto / Acerca de]
 {profile_data.get('about')}
 
@@ -41,6 +45,11 @@ Titular: {profile_data.get('headline')}
 
 [Habilidades]
 {profile_data.get('skills')}
+"""
+    else:
+        profile_summary += f"""
+[Contenido Completo del Perfil (Texto Completo)]
+{profile_data.get('raw_text')}
 """
 
     prompt = f"""
@@ -68,6 +77,7 @@ Reglas de evaluación:
 1. "match_score" debe ser un número entero de 0 a 100. Sé objetivo. Si no cumple con las tecnologías esenciales o el nivel de experiencia requerido, baja el puntaje.
 2. "open_to_work" debe ser un booleano (true/false) que indique si hay evidencia de que el candidato está en búsqueda activa (mención de 'open to work', 'en búsqueda', 'disponible', 'looking for', etc. en su titular o secciones).
 3. "resumen_evaluacion" debe estar redactado en español.
+4. FILTRO DE UBICACIÓN GEOGRÁFICA (PAÍS): Revisa si la descripción de la vacante especifica un país o región obligatoria de trabajo (por ejemplo, México o Estados Unidos). Si es así, identifica el país del candidato en el perfil de LinkedIn. Si el candidato se encuentra físicamente en un país diferente al requerido por la vacante, debes calificar su "match_score" estrictamente como 0, y colocar en el "resumen_evaluacion" la justificación indicando que fue descartado por discrepancia de ubicación geográfica (ejemplo: vacante requiere México pero candidato está en la India).
 
 Responde ÚNICAMENTE con el objeto JSON.
 """
