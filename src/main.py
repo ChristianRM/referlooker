@@ -159,9 +159,9 @@ def main():
         refined_query = query
         
         while not satisfied:
-            # 2. Ejecutar búsqueda en Google / SerpAPI
-            print(f"\nBuscando perfiles en Google con query: {refined_query}...")
-            candidate_urls = search_candidates(refined_query, config)
+            # Contar cuántos candidatos se han procesado previamente para esta vacante para paginar (start_offset)
+            start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
+            candidate_urls = search_candidates(refined_query, config, start_offset=start_offset)
             
             if not candidate_urls:
                 print(f"[Advertencia] No se encontraron perfiles de LinkedIn con la consulta actual.")
