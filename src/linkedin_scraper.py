@@ -124,6 +124,15 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
                 return profile_data
                 
             # --- FASE 2: SCRAPING COMPLETO ---
+            # Hacer scroll hacia abajo de forma progresiva para disparar la carga asíncrona (lazy-load) de LinkedIn
+            print("Cargando secciones completas del perfil (haciendo scroll)...")
+            try:
+                for i in range(1, 5):
+                    page.evaluate(f"window.scrollTo(0, {i * 800})")
+                    page.wait_for_timeout(1200)
+            except Exception as e:
+                print(f"[Depuración] Error al hacer scroll: {e}")
+                
             # Extraer secciones usando los anclajes de ID
             profile_data["about"] = get_section_text(page, "about")
             profile_data["experience"] = get_section_text(page, "experience")
