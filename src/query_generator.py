@@ -86,3 +86,62 @@ Responde ÚNICAMENTE con el objeto JSON.
             "keywords": [],
             "search_query": 'site:linkedin.com/in/ ("open to work" OR "búsqueda activa")'
         }
+
+def generate_refined_search_query(vacancy_text: str, previous_query: str, config: dict) -> str:
+    """
+    Pide a Ollama que genere una consulta de búsqueda X-Ray de Google refinada y alternativa
+    basándose en la vacante y en la consulta anterior que no dio resultados satisfactorios.
+    """
+    model_name = config.get("ollama", {}).get("model", "llama3.1:8b")
+    ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
+    import ollama
+    client = ollama.Client(host=ollama_host)
+    
+    prompt = f"""
+    Eres un reclutador técnico experto en búsquedas booleanas y operadores X-Ray de Google.
+    La consulta de búsqueda anterior que generamos no arrojó resultados satisfactorios o fue demasiado restrictiva.
+    
+    Descripción de la Vacante:
+    \"\"\"
+    {vacancy_text}
+    \"\"\"
+    
+    Consulta de Búsqueda Anterior:
+    "{previous_query}"
+    
+    Tu objetivo es generar una nueva consulta de búsqueda X-Ray optimizada y alternativa.
+    Sigue estas reglas estrictas:
+    1. Debe comenzar directamente con `site:linkedin.com/in/` (o el subdominio correspondiente si hay país requerido).
+    2. Cambia los términos para hacerla más amplia o usa sinónimos alternativos para el rol y las tecnologías.
+    3. Si la consulta anterior tenía demasiados operadores AND, redúcelos para permitir que Google traiga más perfiles.
+    4. Devuelve únicamente un objeto JSON válido (y absolutamente NADA más) con el siguiente formato exacto:
+    {{
+      "search_query": "Nueva consulta optimizada"
+    }}
+    Responde ÚNICAMENTE con el objeto JSON.
+    """
+    
+    try:
+        response = client.generate(
+            model=model_name,
+            prompt=prompt,
+            options={"temperature": 0.3}
+        )
+        response_text = response.get("response", "")
+        # Limpiar y parsear JSON
+        from evaluator import clean_json_response
+        cleaned = clean_json_response(response_text)
+        data = json.loads(cleaned)
+        return data.get("search_query", "")
+    except Exception as e:
+        print(f"[Advertencia] Error al refinar consulta con Ollama: {e}")
+        try:
+            start_idx = response_text.find("{")
+            end_idx = response_text.rfind("}")
+            if start_idx != -1 and end_idx != -1:
+                json_str = response_text[start_idx:end_idx+1]
+                data = json.loads(json_str)
+                return data.get("search_query", "")
+        except Exception:
+            pass
+        return ""
