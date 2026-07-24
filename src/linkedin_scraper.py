@@ -20,6 +20,59 @@ def get_section_text(page, section_id: str) -> str:
         print(f"[Depuración] No se pudo extraer la sección '{section_id}': {e}")
     return ""
 
+def is_location_compatible(candidate_text: str, target_country: str) -> bool:
+    """
+    Verifica si el candidato está en el país objetivo de la vacante.
+    Si la vacante no especifica país (o es Any/Remoto), el candidato de forma obligatoria
+    debe residir en México o Estados Unidos. Si reside fuera, se descarta.
+    """
+    candidate_text_lower = candidate_text.lower()
+    
+    # Términos comunes y subregiones para México y Estados Unidos
+    mexico_terms = [
+        "mexico", "méxico", "mx", "jalisco", "monterrey", "guadalajara", "cdmx", 
+        "queretaro", "querétaro", "nl", "nuevo leon", "ciudad de méxico", "sinaloa", 
+        "puebla", "yucatan", "yucatán", "veracruz", "guanajuato", "chihuahua", "sonora",
+        "baja california", "bc", "b.c.", "tijuana", "leon", "león", "san luis potosi"
+    ]
+    us_terms = [
+        "united states", "usa", "u.s.", "america", "chicago", "new york", "texas", 
+        "california", "florida", "austin", "seattle", "illinois", "boston", "denver", 
+        "atlanta", "dallas", "houston", "miami", "san francisco", "los angeles", 
+        "ny", "tx", "ca", "fl", "wa", "il", "ma", "co", "ga", "az", "phoenix"
+    ]
+    
+    # 1. Si la vacante requiere un país específico
+    if target_country and target_country.lower() not in ("any", "global", "remoto", "remote", ""):
+        target_lower = target_country.lower()
+        if "mexico" in target_lower or "méxico" in target_lower or target_lower == "mx":
+            return any(term in candidate_text_lower for term in mexico_terms)
+        elif "united states" in target_lower or "usa" in target_lower or target_lower == "us":
+            return any(term in candidate_text_lower for term in us_terms)
+        else:
+            # Si pide otro país específico (ej. España), buscar ese término directamente
+            return target_lower in candidate_text_lower
+            
+    # 2. Si la vacante no especifica país (es Any), el candidato OBLIGATORIAMENTE
+    # debe ser de México o Estados Unidos. Si no es de ninguno de los dos, se descarta.
+    is_mexico = any(term in candidate_text_lower for term in mexico_terms)
+    is_us = any(term in candidate_text_lower for term in us_terms)
+    
+    if is_mexico or is_us:
+        # Aún si coincide con MX/US, descartamos si menciona explícitamente otros países lejanos como residencia principal
+        other_countries = ["india", "pakistan", "egypt", "tunisia", "bangladesh", "ukraine", "poland", "nigeria", "brazil", "argentina", "colombia", "peru", "venezuela", "chile", "ecuador", "spain", "españa"]
+        other_countries = [c for c in other_countries if c not in ("mexico", "mexic", "méxico", "united states", "usa")]
+        
+        has_other_mention = any(c in candidate_text_lower for c in other_countries)
+        if has_other_mention:
+            has_strong_local = ("mexico" in candidate_text_lower or "méxico" in candidate_text_lower or 
+                                "united states" in candidate_text_lower or "usa" in candidate_text_lower)
+            if not has_strong_local:
+                return False
+        return True
+        
+    return False
+
 def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict) -> dict:
     """
     Scrapea un perfil de LinkedIn utilizando el perfil persistente de Chrome.
@@ -110,17 +163,18 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
             except Exception:
                 pass
 
-            # Evaluar ubicación con Ollama pasándole el texto de cabecera completo
+            # Evaluar ubicación primero de forma determinista en Python
+            is_compatible = is_location_compatible(header_text, target_country)
+            
+            # Usar Ollama para extraer el nombre bonito de la ubicación para el reporte
             from evaluator import evaluate_location_with_llm
             res = evaluate_location_with_llm(header_text, target_country, config)
-            
-            is_compatible = res.get("compatible", False)
             profile_data["location"] = res.get("extracted_location", "No detectada")
             
             if not is_compatible:
-                print(f"[Descarte Geográfico] Candidato '{profile_data['name']}' descartado por Ollama por estar fuera del país (Ubicación: '{profile_data['location']}', Requerido: '{target_country}').")
+                print(f"[Descarte Geográfico] Candidato '{profile_data['name']}' descartado por estar fuera del país (Ubicación detectada: '{profile_data['location']}', Requerido: '{target_country}').")
                 profile_data["status"] = "location_mismatch"
-                profile_data["error_message"] = f"Ubicación incompatible con Ollama: {profile_data['location']}"
+                profile_data["error_message"] = f"Ubicación incompatible: {profile_data['location']}"
                 context.close()
                 return profile_data
                 
