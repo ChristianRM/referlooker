@@ -134,27 +134,36 @@ def evaluate_location_with_llm(header_text: str, target_country: str, config: di
     required = target_country if target_country.lower() not in ("any", "global", "remoto", "remote", "") else "Mexico o United States"
     
     prompt = f"""
-    Eres un asistente de reclutamiento técnico experto en geolocalización.
-    Analiza la información de cabecera del perfil de LinkedIn del candidato y determina su ubicación.
+    Eres un asistente de reclutamiento técnico y experto en geolocalización de talento internacional.
+    Tu tarea exclusiva es analizar la cabecera de LinkedIn de un candidato y determinar si su ubicación actual es compatible con la requerida por la vacante.
+    
+    Ubicación Requerida por la Vacante: "{required}"
     
     Información de Cabecera del Candidato:
     \"\"\"
     {header_text}
     \"\"\"
     
-    Ubicación Requerida por la Vacante: "{required}"
+    REGLAS DE COMPATIBILIDAD GEOGRÁFICA DE OBLIGADO CUMPLIMIENTO:
+    1. Si la "Ubicación Requerida" es "Mexico o United States":
+       - El candidato debe residir físicamente en México o en Estados Unidos.
+       - Si el candidato reside en cualquier otro país (como India, Nigeria, Colombia, España, etc.), "compatible" DEBE ser estrictamente false.
+    2. Si la "Ubicación Requerida" es "Mexico":
+       - El candidato debe residir físicamente en México.
+       - Si el candidato reside en Estados Unidos, India, Nigeria, Colombia, España, etc., "compatible" DEBE ser estrictamente false.
+    3. Si la "Ubicación Requerida" es "United States" (o USA / US):
+       - El candidato debe residir físicamente en Estados Unidos.
+       - Si el candidato reside en México, India, Nigeria, Colombia, España, etc., "compatible" DEBE ser estrictamente false.
+       
+    4. Identifica con precisión la ubicación del candidato a partir de la cabecera provista (ej: 'Lagos, Nigeria', 'Hyderabad, Telangana, India', 'Dallas, Texas, United States', 'Guadalajara, Jalisco, México').
     
-    Reglas de decisión:
-    1. Si la ubicación requerida es "Mexico o United States", el candidato debe residir en México o en Estados Unidos. Si reside en cualquier otro país (como Colombia, India, España, Túnez, etc.), es incompatible.
-    2. Identifica el país/ciudad/estado del candidato a partir de la cabecera.
-    
-    Debes devolver obligatoriamente un objeto JSON válido (y NADA más) con el siguiente formato exacto:
+    Debes responder OBLIGATORIAMENTE con un objeto JSON válido (y absolutamente NADA más, sin comentarios, sin explicaciones, sin texto libre) que tenga este formato exacto:
     {{
-      "compatible": true,
-      "extracted_location": "Ubicación del candidato extraída (ej: 'Dallas, Texas, United States' o 'Guadalajara, Jalisco, México')"
+      "compatible": false,
+      "extracted_location": "Ubicación del candidato extraída (ej: 'Lagos, Nigeria' o 'Detroit, Michigan, USA')"
     }}
     
-    Si el candidato no es compatible con la ubicación requerida, el campo "compatible" debe ser false.
+    Reemplaza el valor de "compatible" con true si es compatible con el país requerido, o false si no es compatible con el país requerido.
     Responde ÚNICAMENTE con el objeto JSON.
     """
     
