@@ -121,3 +121,46 @@ Responde ÚNICAMENTE con el objeto JSON.
             "open_to_work": False,
             "resumen_evaluacion": f"Error al procesar la evaluación con el modelo: {e}"
         }
+
+def evaluate_location_with_llm(candidate_location: str, target_country: str, config: dict) -> bool:
+    """
+    Pregunta a Ollama si la ubicación del candidato es compatible con la requerida por la vacante.
+    Si la vacante no especifica país (Any/Remote), los países permitidos por defecto son México y Estados Unidos.
+    """
+    model_name = config.get("ollama", {}).get("model", "llama3.1:8b")
+    ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
+    client = ollama.Client(host=ollama_host)
+    
+    required = target_country if target_country.lower() not in ("any", "global", "remoto", "remote", "") else "Mexico o United States"
+    
+    prompt = f"""
+    País/Ubicación Requerido por la Vacante: "{required}"
+    Ubicación del Candidato en LinkedIn: "{candidate_location}"
+    
+    Tu tarea es determinar si el candidato reside actualmente en el mismo país requerido por la vacante.
+    Reglas:
+    1. Si la ubicación requerida es "Mexico o United States", el candidato debe residir en México o en Estados Unidos. Si reside en cualquier otro país (como Colombia, España, India, etc.), es incompatible.
+    2. Si el candidato está en el país requerido, responde únicamente "YES".
+    3. Si el candidato está en un país diferente al requerido, responde únicamente "NO".
+    
+    Responde estrictamente con una sola palabra: "YES" o "NO". No agregues explicaciones, puntuación ni otros caracteres.
+    """
+    
+    try:
+        response = client.generate(
+            model=model_name,
+            prompt=prompt,
+            options={"temperature": 0.0} # Temperatura cero para máxima precisión y determinismo
+        )
+        ans = response.get("response", "").strip().upper()
+        if "YES" in ans:
+            return True
+        return False
+    except Exception as e:
+        print(f"[Advertencia] Error al evaluar ubicación con Ollama: {e}")
+        # Fallback simple en Python
+        loc_lower = candidate_location.lower()
+        if required == "Mexico o United States":
+            return any(term in loc_lower for term in ["mexic", "méxic", "mx", "united states", "usa", "u.s."])
+        return target_country.lower() in loc_lower
+
