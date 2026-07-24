@@ -22,11 +22,9 @@ def get_section_text(page, section_id: str) -> str:
 
 def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
     """
-    Navega al perfil de LinkedIn y extrae los datos utilizando Playwright y cookies.
+    Scrapea un perfil de LinkedIn utilizando el perfil persistente de Chrome.
+    Forzamos headless=False para evitar que LinkedIn bloquee la petición mandándola a un authwall.
     """
-    cookies_path = config.get("scraping", {}).get("cookies_path", "cookies.json")
-    headless = config.get("scraping", {}).get("headless", True)
-    
     profile_data = {
         "url": profile_url,
         "name": "",
@@ -39,27 +37,22 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
         "error_message": ""
     }
     
-    if not os.path.exists(cookies_path):
-        error_msg = f"Archivo de cookies '{cookies_path}' no encontrado. Ejecuta 'python src/save_cookies.py' primero."
-        print(f"[Error] {error_msg}")
-        profile_data["error_message"] = error_msg
-        profile_data["status"] = "cookies_missing"
-        return profile_data
-        
-    print(f"Scrapeando perfil: {profile_url}")
+    user_data_dir = os.path.abspath("linkedin_profile_context")
     
     with sync_playwright() as p:
         try:
-            # Lanzamos Chromium cargando el estado de almacenamiento guardado con el mismo User-Agent
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(
-                storage_state=cookies_path,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            # Lanzamos Chromium con el perfil persistente en modo visible (headless=False)
+            context = p.chromium.launch_persistent_context(
+                user_data_dir,
+                headless=False,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 720}
             )
-            page = context.new_page()
+            page = context.pages[0] if context.pages else context.new_page()
             
             # Navegar a la página del perfil con un tiempo de espera de 30 segundos
             page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
+            
             # Esperar a que cargue el elemento h1 (nombre del perfil) en el DOM
             try:
                 page.wait_for_selector("h1", timeout=10000)
@@ -71,12 +64,12 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
             
             current_url = page.url
             # Comprobar si LinkedIn nos redirigió a la página de login o desafío de seguridad
-            if "linkedin.com/login" in current_url or "checkpoint" in current_url:
-                error_msg = "Cookies vencidas o sesión cerrada por LinkedIn. Por favor ejecuta 'python src/save_cookies.py' para renovar sesión."
+            if "linkedin.com/login" in current_url or "checkpoint" in current_url or "authwall" in current_url:
+                error_msg = "Sesión cerrada o expirada en el perfil persistente."
                 print(f"[Error] {error_msg}")
                 profile_data["error_message"] = error_msg
                 profile_data["status"] = "session_expired"
-                browser.close()
+                context.close()
                 return profile_data
                 
             # Extraer el Nombre (normalmente la primera etiqueta h1 en la página)
@@ -88,7 +81,6 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
                 pass
                 
             # Extraer el Headline/Titular
-            # LinkedIn suele tener el titular justo debajo del nombre, a menudo en un elemento con clase text-body-medium
             try:
                 headline_locator = page.locator(".text-body-medium").first
                 if headline_locator.count() > 0:
@@ -123,12 +115,12 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
                 body_text = profile_data["raw_text"].lower()
                 if "join linkedin" in body_text or "iniciar sesión" in body_text or "sign in" in body_text or is_login_wall:
                     profile_data["status"] = "session_expired"
-                    profile_data["error_message"] = "LinkedIn solicitó iniciar sesión o registrarse. Las cookies de sesión son inválidas, expiraron o no se cargaron correctamente."
+                    profile_data["error_message"] = "LinkedIn solicitó iniciar sesión o registrarse. La sesión del perfil persistente ha expirado o no es válida."
                 else:
                     profile_data["status"] = "empty"
                     profile_data["error_message"] = "No se encontraron datos en el perfil público/privado."
                     
-            browser.close()
+            context.close()
             
         except Exception as e:
             error_msg = f"Excepción durante el scraping: {e}"
@@ -140,24 +132,24 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
 
 def ensure_linkedin_session(config: dict):
     """
-    Verifica de forma automática si existe una sesión válida de LinkedIn.
+    Verifica de forma automática si existe una sesión válida de LinkedIn en el perfil persistente.
     Si no existe o si ha expirado, abre una ventana de Chrome visible para que el usuario
-    inicie sesión, guardando el estado de almacenamiento antes de proceder.
+    inicie sesión, persistiendo el estado directamente de forma nativa.
     """
-    cookies_path = config.get("scraping", {}).get("cookies_path", "cookies.json")
+    user_data_dir = os.path.abspath("linkedin_profile_context")
     session_valid = False
     
-    if os.path.exists(cookies_path):
+    if os.path.exists(user_data_dir):
         print("Verificando si tu sesión de LinkedIn sigue activa...")
         with sync_playwright() as p:
             try:
                 # Corremos en headless para verificar en segundo plano de forma silenciosa
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    storage_state=cookies_path,
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir,
+                    headless=True,
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 )
-                page = context.new_page()
+                page = context.pages[0] if context.pages else context.new_page()
                 
                 # Ir a la página de feed que requiere autenticación
                 page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=25000)
@@ -170,7 +162,7 @@ def ensure_linkedin_session(config: dict):
                     print("[Sesión] Tu sesión de LinkedIn está ACTIVA y es válida.")
                 else:
                     print("[Sesión] Sesión de LinkedIn EXPIRADA o no válida.")
-                browser.close()
+                context.close()
             except Exception as e:
                 print(f"[Sesión] Error comprobando sesión: {e}")
                 
@@ -183,11 +175,13 @@ def ensure_linkedin_session(config: dict):
         
         with sync_playwright() as p:
             try:
-                browser = p.chromium.launch(headless=False)
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir,
+                    headless=False,
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    viewport={"width": 1280, "height": 720}
                 )
-                page = context.new_page()
+                page = context.pages[0] if context.pages else context.new_page()
                 
                 print("Navegando a la página de inicio de sesión de LinkedIn...")
                 page.goto("https://www.linkedin.com/login")
@@ -202,10 +196,9 @@ def ensure_linkedin_session(config: dict):
                 
                 input("Presiona ENTER cuando estés listo...")
                 
-                # Guardar estado de almacenamiento completo (cookies + local storage)
-                context.storage_state(path=cookies_path)
-                print(f"\n[Éxito] Sesión de LinkedIn iniciada y guardada en {cookies_path}")
-                browser.close()
+                # Cerrar guarda automáticamente todo en user_data_dir
+                print(f"\n[Éxito] Sesión de LinkedIn iniciada y guardada de forma persistente en {user_data_dir}")
+                context.close()
             except Exception as e:
                 print(f"[Error] Falló la autenticación asistida: {e}")
 
