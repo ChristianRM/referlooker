@@ -7,7 +7,7 @@ import pandas as pd
 # Añadir directorio actual al path por si acaso
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from query_generator import generate_search_query
+from query_generator import generate_search_query, generate_refined_search_query
 from search_engine import search_candidates
 from linkedin_scraper import scrape_linkedin_profile, ensure_linkedin_session
 from evaluator import evaluate_candidate
@@ -200,6 +200,9 @@ def main():
                             "resumen_evaluacion": f"Descartado automáticamente por Ollama: ubicación fuera del país. (Ubicación: '{profile.get('location')}', Vacante requiere: '{target_country}').",
                             "linkedin_url": url,
                             "location": profile.get("location") or "No especificada",
+                            "acerca_de": profile.get("about") or "",
+                            "experiencia": profile.get("experience") or "",
+                            "habilidades": profile.get("skills") or "",
                             "timestamp": pd.Timestamp.now().isoformat()
                         }
                         update_json_report(candidate_record)
@@ -217,6 +220,9 @@ def main():
                             "resumen_evaluacion": f"Error al scrapear perfil: {profile['error_message']}",
                             "linkedin_url": url,
                             "location": profile.get("location") or "No especificada",
+                            "acerca_de": profile.get("about") or "",
+                            "experiencia": profile.get("experience") or "",
+                            "habilidades": profile.get("skills") or "",
                             "timestamp": pd.Timestamp.now().isoformat()
                         }
                         update_json_report(candidate_record)
@@ -241,6 +247,9 @@ def main():
                         "resumen_evaluacion": eval_resumen,
                         "linkedin_url": url,
                         "location": profile.get("location") or "No especificada",
+                        "acerca_de": profile.get("about") or "",
+                        "experiencia": profile.get("experience") or "",
+                        "habilidades": profile.get("skills") or "",
                         "timestamp": pd.Timestamp.now().isoformat()
                     }
                     update_json_report(candidate_record)
@@ -283,15 +292,19 @@ def main():
                 except Exception as e:
                     print(f"[Error] No se pudo mover la vacante a históricos: {e}")
             else:
-                refine_input = input("¿Deseas continuar la búsqueda refinando la consulta o cargando más perfiles? (S/N) [N]: ").strip().lower()
-                if refine_input == "s":
-                    extra_terms = input("Ingresa palabras clave adicionales para la búsqueda (ej: 'Tulsa' o 'SRE' o 'Reading'): ").strip()
-                    if extra_terms:
-                        refined_query = f"{query} AND ({extra_terms})"
-                        print(f"[Refinamiento] Nueva consulta de búsqueda: {refined_query}")
+                refine_input = input("¿Deseas que Ollama auto-refine la consulta de búsqueda para encontrar más candidatos? (S/N) [S]: ").strip().lower()
+                if refine_input in ("", "s", "si", "yes"):
+                    print("Pidiendo a Ollama que auto-refine la consulta de búsqueda...")
+                    new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
+                    if new_refined:
+                        print(f"\n--> Ollama generó la siguiente consulta refinada:\n{new_refined}")
+                        use_refined = input("¿Deseas ejecutar la búsqueda con esta consulta refinada? (S/N) [S]: ").strip().lower()
+                        if use_refined in ("", "s", "si", "yes"):
+                            refined_query = new_refined
+                        else:
+                            print("[Info] No se aplicó el refinamiento. Reintentando con consulta anterior.")
                     else:
-                        print("[Info] No ingresaste nuevos términos. Terminando refinamiento.")
-                        break
+                        print("[Advertencia] Ollama no pudo generar una consulta refinada. Reintentando con consulta anterior.")
                 else:
                     print(f"[Info] Manteniendo la vacante '{vac_file}' en 'vacantes/' para futuras corridas.")
                     break
