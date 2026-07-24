@@ -20,10 +20,12 @@ def get_section_text(page, section_id: str) -> str:
         print(f"[Depuración] No se pudo extraer la sección '{section_id}': {e}")
     return ""
 
-def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
+def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict) -> dict:
     """
     Scrapea un perfil de LinkedIn utilizando el perfil persistente de Chrome.
-    Forzamos headless=False para evitar que LinkedIn bloquee la petición mandándola a un authwall.
+    Implementa un flujo en dos fases:
+    Fase 1: Extrae la ubicación y pregunta a Ollama si es compatible con el país requerido.
+    Fase 2: Si es compatible, realiza el scraping completo de secciones y texto raw.
     """
     profile_data = {
         "url": profile_url,
@@ -60,7 +62,7 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
             except Exception:
                 pass
                 
-            # Dar un margen de 2 segundos para permitir que carguen las secciones dinámicas (About, Experience)
+            # Dar un margen de 2 segundos para permitir que cargue la cabecera
             page.wait_for_timeout(2000)
             
             current_url = page.url
@@ -73,39 +75,12 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
                 context.close()
                 return profile_data
                 
-            # Extraer el Nombre (normalmente la primera etiqueta h1 en la página)
+            # --- FASE 1: EXTRACCIÓN DE CABECERA Y FILTRADO RÁPIDO DE PAÍS ---
+            # Extraer Nombre (normalmente la primera etiqueta h1 en la página)
             try:
                 name_locator = page.locator("h1").first
                 if name_locator.count() > 0:
                     profile_data["name"] = name_locator.inner_text().strip()
-            except Exception:
-                pass
-                
-            # Extraer el Headline/Titular
-            try:
-                headline_locator = page.locator(".text-body-medium").first
-                if headline_locator.count() > 0:
-                    profile_data["headline"] = headline_locator.inner_text().strip()
-            except Exception:
-                pass
-                
-            # Extraer la ubicación del candidato
-            try:
-                # El elemento con la clase .text-body-small de la cabecera suele tener la ubicación del candidato
-                loc_locator = page.locator("span.text-body-small.inline, .pv-text-details__left-panel .text-body-small").first
-                if loc_locator.count() > 0:
-                    profile_data["location"] = loc_locator.inner_text().strip()
-            except Exception:
-                pass
-                
-            # Extraer secciones usando los anclajes de ID
-            profile_data["about"] = get_section_text(page, "about")
-            profile_data["experience"] = get_section_text(page, "experience")
-            profile_data["skills"] = get_section_text(page, "skills")
-            
-            # Si no pudimos obtener nada con selectores, extraemos el texto general del body como fallback
-            try:
-                profile_data["raw_text"] = page.locator("body").inner_text()
             except Exception:
                 pass
                 
@@ -118,6 +93,49 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
                         raw_name = raw_name.split(" - ")[0]
                     profile_data["name"] = raw_name.strip()
                     
+            # Extraer el Headline/Titular
+            try:
+                headline_locator = page.locator(".text-body-medium").first
+                if headline_locator.count() > 0:
+                    profile_data["headline"] = headline_locator.inner_text().strip()
+            except Exception:
+                pass
+                
+            # Extraer la ubicación del candidato
+            try:
+                loc_locator = page.locator("span.text-body-small.inline, .pv-text-details__left-panel .text-body-small").first
+                if loc_locator.count() > 0:
+                    profile_data["location"] = loc_locator.inner_text().strip()
+            except Exception:
+                pass
+
+            # Evaluar ubicación con Ollama
+            candidate_loc = profile_data.get("location", "")
+            if not candidate_loc:
+                candidate_loc = profile_data.get("headline", "")
+            
+            from evaluator import evaluate_location_with_llm
+            is_compatible = evaluate_location_with_llm(candidate_loc, target_country, config)
+            
+            if not is_compatible:
+                print(f"[Descarte Geográfico] Candidato '{profile_data['name']}' descartado por Ollama por estar fuera del país (Ubicación: '{candidate_loc}', Requerido: '{target_country}').")
+                profile_data["status"] = "location_mismatch"
+                profile_data["error_message"] = f"Ubicación incompatible con Ollama: {candidate_loc}"
+                context.close()
+                return profile_data
+                
+            # --- FASE 2: SCRAPING COMPLETO ---
+            # Extraer secciones usando los anclajes de ID
+            profile_data["about"] = get_section_text(page, "about")
+            profile_data["experience"] = get_section_text(page, "experience")
+            profile_data["skills"] = get_section_text(page, "skills")
+            
+            # Si no pudimos obtener nada con selectores, extraemos el texto general del body como fallback
+            try:
+                profile_data["raw_text"] = page.locator("body").inner_text()
+            except Exception:
+                pass
+                
             # Validar si logramos extraer información sustancial y no caímos en un muro de registro/login
             name_lower = profile_data["name"].lower()
             is_login_wall = (
