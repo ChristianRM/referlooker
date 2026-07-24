@@ -12,6 +12,21 @@ from search_engine import search_candidates
 from linkedin_scraper import scrape_linkedin_profile, ensure_linkedin_session
 from evaluator import evaluate_candidate
 
+class Tee:
+    def __init__(self, filename, mode="a"):
+        self.file = open(filename, mode, encoding="utf-8")
+        self.stdout = sys.stdout
+        self.stderr = sys.stderr
+
+    def write(self, message):
+        self.stdout.write(message)
+        self.file.write(message)
+        self.file.flush()
+
+    def flush(self):
+        self.stdout.flush()
+        self.file.flush()
+
 def load_config():
     """Carga config.json si existe."""
     config_path = "config.json"
@@ -124,8 +139,13 @@ def update_excel_report(candidate_info: dict, excel_path: str):
     df.to_excel(excel_path, index=False)
 
 def main():
-    config = load_config()
     setup_directories()
+    # Inicializar Tee para escribir a consola y archivo de log
+    tee = Tee("output/referral_bot.log", mode="w")
+    sys.stdout = tee
+    sys.stderr = tee
+    
+    config = load_config()
     
     # Obtener archivos de vacantes
     vacancy_files = [f for f in os.listdir("vacantes") if f.endswith(".txt")]
