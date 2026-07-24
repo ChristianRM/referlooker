@@ -20,6 +20,37 @@ def get_section_text(page, section_id: str) -> str:
         print(f"[Depuración] No se pudo extraer la sección '{section_id}': {e}")
     return ""
 
+def expand_collapsed_sections(page):
+    """
+    Busca y hace clic en todos los botones de 'ver más', 'see more' o 'show more'
+    para expandir las descripciones y secciones colapsadas del perfil.
+    """
+    try:
+        # Selectores comunes de botones "ver más"
+        selectors = [
+            "button:has-text('see more')",
+            "button:has-text('ver más')",
+            "button:has-text('ver mas')",
+            "button:has-text('show more')",
+            "button.inline-show-more-text",
+            "span:has-text('...see more')",
+            "span:has-text('...ver más')"
+        ]
+        
+        for selector in selectors:
+            try:
+                buttons = page.locator(selector)
+                count = buttons.count()
+                for i in range(count):
+                    btn = buttons.nth(i)
+                    if btn.is_visible():
+                        btn.click(timeout=1000, force=True)
+                        page.wait_for_timeout(300)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict) -> dict:
     """
     Scrapea un perfil de LinkedIn utilizando el perfil persistente de Chrome.
@@ -132,7 +163,10 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
                     page.wait_for_timeout(1200)
             except Exception as e:
                 print(f"[Depuración] Error al hacer scroll: {e}")
-                
+            
+            # Expandir los bloques de texto colapsados ("ver más" / "see more")
+            expand_collapsed_sections(page)
+            
             # Extraer secciones usando los anclajes de ID
             profile_data["about"] = get_section_text(page, "about")
             profile_data["experience"] = get_section_text(page, "experience")
