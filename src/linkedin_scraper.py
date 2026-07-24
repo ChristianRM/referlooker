@@ -99,6 +99,15 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
             except Exception:
                 pass
                 
+            # Fallback: Extraer el Nombre del título de la página si no se pudo de la etiqueta h1
+            if not profile_data["name"] or profile_data["name"].lower() in ("", "join linkedin", "iniciar sesión", "sign in", "welcome to linkedin"):
+                title = page.title()
+                if " | LinkedIn" in title:
+                    raw_name = title.split(" | LinkedIn")[0]
+                    if " - " in raw_name:
+                        raw_name = raw_name.split(" - ")[0]
+                    profile_data["name"] = raw_name.strip()
+                    
             # Validar si logramos extraer información sustancial y no caímos en un muro de registro/login
             name_lower = profile_data["name"].lower()
             is_login_wall = (
@@ -107,13 +116,15 @@ def scrape_linkedin_profile(profile_url: str, config: dict) -> dict:
                 "iniciar sesión" in name_lower
             )
             
-            if (profile_data["name"] or profile_data["about"] or profile_data["experience"]) and not is_login_wall:
+            # Si el nombre es un nombre real y pudimos obtener el texto del body, es exitoso (incluso si son conexiones lejanas)
+            if profile_data["name"] and not is_login_wall and len(profile_data["raw_text"]) > 200:
                 profile_data["status"] = "success"
                 print(f"Perfil de '{profile_data['name']}' scrapeado con éxito.")
             else:
-                # Comprobar si se detectó pantalla de restricción o muro de registro
+                # Comprobar si se detectó pantalla de restricción real (no el footer público)
                 body_text = profile_data["raw_text"].lower()
-                if "join linkedin" in body_text or "iniciar sesión" in body_text or "sign in" in body_text or is_login_wall:
+                # Un muro de login real suele ser muy corto o no tener secciones principales
+                if (is_login_wall or "join linkedin" in body_text or "iniciar sesión" in body_text) and len(body_text) < 1500:
                     profile_data["status"] = "session_expired"
                     profile_data["error_message"] = "LinkedIn solicitó iniciar sesión o registrarse. La sesión del perfil persistente ha expirado o no es válida."
                 else:
