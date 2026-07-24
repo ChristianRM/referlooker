@@ -38,18 +38,20 @@ Vacante:
 \"\"\"
 
 Debes devolver obligatoriamente un objeto JSON válido (y NADA más, sin introducciones ni explicaciones) con la siguiente estructura:
-{{
+{
   "role": "Nombre simplificado del puesto (ej: Senior Python Developer)",
+  "target_country": "País objetivo de la vacante si se menciona, ej: 'Mexico' o 'United States'. Si no se especifica o es remoto/global, escribe 'Any'",
   "keywords": ["palabra_clave1", "palabra_clave2", ...],
   "search_query": "Consulta de búsqueda X-Ray de Google optimizada"
-}}
+}
 
 Reglas para construir el "search_query":
-1. Comienza la consulta OBLIGATORIAMENTE con `site:linkedin.com/in/` de forma directa, sin colocarle paréntesis alrededor. Por ejemplo, escribe `site:linkedin.com/in/ ("open to work" ...)` y NUNCA `(site:linkedin.com/in/)`.
-2. Incluye variantes comunes de búsqueda activa de empleo como `("open to work" OR "open to opportunities" OR "búsqueda activa")`.
-3. Incluye el rol principal (ej: `("Backend Developer" OR "Backend Engineer")`).
-4. Agrega tecnologías indispensables usando operadores booleanos (ej: `("Django" OR "FastAPI")`).
-5. Evita comillas innecesarias o consultas demasiado largas que rompan el buscador.
+1. De forma predeterminada, comienza la consulta con `site:linkedin.com/in/` de forma directa, sin colocarle paréntesis alrededor. Por ejemplo, escribe `site:linkedin.com/in/ ("open to work" ...)` y NUNCA `(site:linkedin.com/in/)`.
+2. REGLA DE UBICACIÓN REGIONAL: Si la vacante especifica un país de trabajo obligatorio, ajusta el inicio de la consulta para usar el subdominio correspondiente de LinkedIn (por ejemplo, si es en México, usa `site:mx.linkedin.com/in/`. Si es en España, usa `site:es.linkedin.com/in/`. Si es en Estados Unidos o global, usa `site:linkedin.com/in/` e incluye el país o región en la consulta de búsqueda, por ejemplo: `AND ("United States" OR "USA")`).
+3. Incluye variantes comunes de búsqueda activa de empleo como `("open to work" OR "open to opportunities" OR "búsqueda activa")`.
+4. Incluye el rol principal (ej: `("Backend Developer" OR "Backend Engineer")`).
+5. Agrega tecnologías indispensables usando operadores booleanos (ej: `("Django" OR "FastAPI")`).
+6. Evita comillas innecesarias o consultas demasiado largas que rompan el buscador.
 
 Responde ÚNICAMENTE con el objeto JSON.
 """
