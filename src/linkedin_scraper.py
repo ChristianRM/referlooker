@@ -20,53 +20,62 @@ def get_section_text(page, section_id: str) -> str:
         print(f"[Depuración] No se pudo extraer la sección '{section_id}': {e}")
     return ""
 
-def is_location_compatible(candidate_text: str, target_country: str) -> bool:
+import re
+
+def is_location_compatible(location_text: str, target_country: str) -> bool:
     """
-    Verifica si el candidato está en el país objetivo de la vacante.
-    Si la vacante no especifica país (o es Any/Remoto), el candidato de forma obligatoria
-    debe residir en México o Estados Unidos. Si reside fuera, se descarta.
+    Verifica de forma determinista si la ubicación extraída pertenece al país objetivo.
+    Usa expresiones regulares con límites de palabra (\b) para evitar falsas coincidencias de substrings.
     """
-    candidate_text_lower = candidate_text.lower()
+    loc_lower = location_text.lower()
     
-    # Términos comunes y subregiones para México y Estados Unidos
-    mexico_terms = [
-        "mexico", "méxico", "mx", "jalisco", "monterrey", "guadalajara", "cdmx", 
-        "queretaro", "querétaro", "nl", "nuevo leon", "ciudad de méxico", "sinaloa", 
-        "puebla", "yucatan", "yucatán", "veracruz", "guanajuato", "chihuahua", "sonora",
-        "baja california", "bc", "b.c.", "tijuana", "leon", "león", "san luis potosi"
+    # Expresiones de coincidencia para México y EE. UU.
+    mexico_patterns = [
+        r'\bmexico\b', r'\bméxico\b', r'\bmx\b', r'\bjalisco\b', r'\bmonterrey\b', 
+        r'\bguadalajara\b', r'\bcdmx\b', r'\bqueretaro\b', r'\bquerétaro\b', 
+        r'\bnl\b', r'\bnuevo leon\b', r'\bciudad de méxico\b', r'\bsinaloa\b', 
+        r'\bpuebla\b', r'\byucatan\b', r'\byucatán\b', r'\bveracruz\b', 
+        r'\bguanajuato\b', r'\bchihuahua\b', r'\bsonora\b', r'\bbaja california\b', 
+        r'\btijuana\b', r'\bleon\b', r'\bleón\b', r'\bsan luis potosi\b'
     ]
-    us_terms = [
-        "united states", "usa", "u.s.", "america", "chicago", "new york", "texas", 
-        "california", "florida", "austin", "seattle", "illinois", "boston", "denver", 
-        "atlanta", "dallas", "houston", "miami", "san francisco", "los angeles", 
-        "ny", "tx", "ca", "fl", "wa", "il", "ma", "co", "ga", "az", "phoenix"
+    
+    us_patterns = [
+        r'\bunited states\b', r'\busa\b', r'\bu\.s\.\b', r'\bamerica\b', r'\bchicago\b', 
+        r'\bnew york\b', r'\btexas\b', r'\bcalifornia\b', r'\bflorida\b', r'\baustin\b', 
+        r'\bseattle\b', r'\billinois\b', r'\bboston\b', r'\bdenver\b', r'\batlanta\b', 
+        r'\bdallas\b', r'\bhouston\b', r'\bmiami\b', r'\bsan francisco\b', r'\blos angeles\b',
+        r'\bny\b', r'\btx\b', r'\bca\b', r'\bfl\b', r'\bwa\b', r'\bil\b', r'\bma\b', 
+        r'\bco\b', r'\bga\b', r'\baz\b', r'\bphoenix\b', r'\bus\b'
     ]
     
     # 1. Si la vacante requiere un país específico
     if target_country and target_country.lower() not in ("any", "global", "remoto", "remote", ""):
         target_lower = target_country.lower()
         if "mexico" in target_lower or "méxico" in target_lower or target_lower == "mx":
-            return any(term in candidate_text_lower for term in mexico_terms)
+            return any(re.search(pat, loc_lower) for pat in mexico_patterns)
         elif "united states" in target_lower or "usa" in target_lower or target_lower == "us":
-            return any(term in candidate_text_lower for term in us_terms)
+            return any(re.search(pat, loc_lower) for pat in us_patterns)
         else:
-            # Si pide otro país específico (ej. España), buscar ese término directamente
-            return target_lower in candidate_text_lower
+            # Coincidencia exacta de palabra para el país dado
+            return re.search(rf'\b{re.escape(target_lower)}\b', loc_lower) is not None
             
-    # 2. Si la vacante no especifica país (es Any), el candidato OBLIGATORIAMENTE
-    # debe ser de México o Estados Unidos. Si no es de ninguno de los dos, se descarta.
-    is_mexico = any(term in candidate_text_lower for term in mexico_terms)
-    is_us = any(term in candidate_text_lower for term in us_terms)
+    # 2. Si la vacante no especifica país (es Any), el candidato obligatoriamente debe ser de México o Estados Unidos
+    is_mexico = any(re.search(pat, loc_lower) for pat in mexico_patterns)
+    is_us = any(re.search(pat, loc_lower) for pat in us_patterns)
     
     if is_mexico or is_us:
-        # Aún si coincide con MX/US, descartamos si menciona explícitamente otros países lejanos como residencia principal
+        # Descartar si menciona explícitamente otros países lejanos como residencia principal
         other_countries = ["india", "pakistan", "egypt", "tunisia", "bangladesh", "ukraine", "poland", "nigeria", "brazil", "argentina", "colombia", "peru", "venezuela", "chile", "ecuador", "spain", "españa"]
-        other_countries = [c for c in other_countries if c not in ("mexico", "mexic", "méxico", "united states", "usa")]
+        other_patterns = [rf'\b{c}\b' for c in other_countries]
         
-        has_other_mention = any(c in candidate_text_lower for c in other_countries)
+        has_other_mention = any(re.search(pat, loc_lower) for pat in other_patterns)
         if has_other_mention:
-            has_strong_local = ("mexico" in candidate_text_lower or "méxico" in candidate_text_lower or 
-                                "united states" in candidate_text_lower or "usa" in candidate_text_lower)
+            has_strong_local = (
+                re.search(r'\bmexico\b', loc_lower) or 
+                re.search(r'\bméxico\b', loc_lower) or 
+                re.search(r'\bunited states\b', loc_lower) or 
+                re.search(r'\busa\b', loc_lower)
+            )
             if not has_strong_local:
                 return False
         return True
