@@ -101,26 +101,26 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
             except Exception:
                 pass
                 
-            # Extraer la ubicación del candidato
+            # Extraer el texto de la cabecera (primeros 2500 caracteres de la página, que garantizan tener la ubicación y nombre)
+            header_text = ""
             try:
-                loc_locator = page.locator("span.text-body-small.inline, .pv-text-details__left-panel .text-body-small").first
-                if loc_locator.count() > 0:
-                    profile_data["location"] = loc_locator.inner_text().strip()
+                body_locator = page.locator("body")
+                if body_locator.count() > 0:
+                    header_text = body_locator.inner_text()[:2500].strip()
             except Exception:
                 pass
 
-            # Evaluar ubicación con Ollama
-            candidate_loc = profile_data.get("location", "")
-            if not candidate_loc:
-                candidate_loc = profile_data.get("headline", "")
-            
+            # Evaluar ubicación con Ollama pasándole el texto de cabecera completo
             from evaluator import evaluate_location_with_llm
-            is_compatible = evaluate_location_with_llm(candidate_loc, target_country, config)
+            res = evaluate_location_with_llm(header_text, target_country, config)
+            
+            is_compatible = res.get("compatible", False)
+            profile_data["location"] = res.get("extracted_location", "No detectada")
             
             if not is_compatible:
-                print(f"[Descarte Geográfico] Candidato '{profile_data['name']}' descartado por Ollama por estar fuera del país (Ubicación: '{candidate_loc}', Requerido: '{target_country}').")
+                print(f"[Descarte Geográfico] Candidato '{profile_data['name']}' descartado por Ollama por estar fuera del país (Ubicación: '{profile_data['location']}', Requerido: '{target_country}').")
                 profile_data["status"] = "location_mismatch"
-                profile_data["error_message"] = f"Ubicación incompatible con Ollama: {candidate_loc}"
+                profile_data["error_message"] = f"Ubicación incompatible con Ollama: {profile_data['location']}"
                 context.close()
                 return profile_data
                 
