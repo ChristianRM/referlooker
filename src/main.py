@@ -138,6 +138,46 @@ def update_excel_report(candidate_info: dict, excel_path: str):
         
     df.to_excel(excel_path, index=False)
 
+def is_location_compatible(candidate_text: str, target_country: str) -> bool:
+    """
+    Verifica de forma rápida si el candidato está en el país objetivo de la vacante.
+    Retorna True si es compatible o si no se especificó país.
+    Retorna False si el candidato está en un país incompatible.
+    """
+    if not target_country or target_country.lower() in ("any", "global", "remoto", "remote", ""):
+        return True
+        
+    candidate_text_lower = candidate_text.lower()
+    target_lower = target_country.lower()
+    
+    # Mapear países comunes y sus sinónimos/regiones
+    country_synonyms = {
+        "mexico": ["mexico", "méxico", "mx", "jalisco", "monterrey", "guadalajara", "cdmx", "queretaro", "querétaro", "nl", "nuevo leon"],
+        "united states": ["united states", "usa", "u.s.", "america", "chicago", "new york", "texas", "california", "florida", "austin", "seattle", "illinois", "boston"],
+        "spain": ["spain", "españa", "es", "madrid", "barcelona", "valencia"]
+    }
+    
+    # Obtener lista de términos válidos para el país objetivo
+    valid_terms = country_synonyms.get(target_lower, [target_lower])
+    
+    # Comprobar si el texto del candidato menciona el país objetivo o alguno de sus términos representativos
+    has_target_mention = any(term in candidate_text_lower for term in valid_terms)
+    if has_target_mention:
+        return True
+        
+    # Si no menciona el país objetivo, pero menciona explícitamente otros países lejanos, lo descartamos
+    other_countries = ["india", "pakistan", "egypt", "tunisia", "bangladesh", "ukraine", "poland", "nigeria", "brazil", "argentina", "colombia"]
+    
+    # Excluir el propio target_country de la lista de descarte
+    other_countries = [c for c in other_countries if c != target_lower and c not in valid_terms]
+    
+    has_other_mention = any(c in candidate_text_lower for c in other_countries)
+    if has_other_mention:
+        return False
+        
+    # Por defecto dejamos pasar para que el LLM evalúe detalles finos
+    return True
+
 def main():
     setup_directories()
     # Inicializar Tee para escribir a consola y archivo de log
@@ -180,8 +220,10 @@ def main():
         analysis = generate_search_query(vacancy_text, config)
         role = analysis.get("role", "Desconocido")
         query = analysis.get("search_query", "")
+        target_country = analysis.get("target_country", "Any")
         
         print(f"Rol detectado: {role}")
+        print(f"País objetivo de la vacante: {target_country}")
         print(f"Query generada: {query}")
         
         if not query:
@@ -210,7 +252,7 @@ def main():
             # Scrapear perfil
             profile = scrape_linkedin_profile(url, config)
             
-            # Registrar URL en el historial (independiente de si fue exitoso o falló para no volver a intentar)
+            # Registrar URL en el historial
             processed_history[url] = {
                 "vacante": vac_file,
                 "status": profile["status"],
@@ -218,6 +260,18 @@ def main():
                 "timestamp": pd.Timestamp.now().isoformat()
             }
             save_processed_urls(processed_history)
+            
+            if profile["status"] == "success":
+                # Validar compatibilidad geográfica antes de gastar recursos del LLM
+                candidate_full_text = (profile.get("raw_text", "") + " " + 
+                                       profile.get("headline", "") + " " + 
+                                       profile.get("name", ""))
+                if not is_location_compatible(candidate_full_text, target_country):
+                    print(f"[Descarte] Candidato '{profile['name']}' descartado en Python por discrepancia geográfica (Vacante requiere: {target_country}).")
+                    # Actualizar estado a descarte geográfico en el historial
+                    processed_history[url]["status"] = "location_mismatch"
+                    save_processed_urls(processed_history)
+                    continue
             
             if profile["status"] != "success":
                 print(f"[Error Scraper] No se pudo procesar {url}: {profile['error_message']}")
