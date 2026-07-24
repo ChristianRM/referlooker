@@ -172,8 +172,58 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
             profile_data["experience"] = get_section_text(page, "experience")
             profile_data["skills"] = get_section_text(page, "skills")
             
+            # Obtener el URL base del perfil sin sufijos (ej. https://www.linkedin.com/in/username)
+            base_profile_url = profile_url
+            if "/in/" in profile_url:
+                try:
+                    parts = profile_url.split("/in/")
+                    username = parts[1].split("/")[0].split("?")[0]
+                    base_profile_url = f"https://www.linkedin.com/in/{username}"
+                except Exception:
+                    pass
+            
+            # Autocuración: Si la experiencia está vacía, navegar directamente al sub-enlace de detalles
+            if not profile_data["experience"] or len(profile_data["experience"].strip()) < 15:
+                print(f"[Autocuración] Experiencia vacía en página principal. Navegando a detalles de experiencia...")
+                try:
+                    exp_url = base_profile_url.rstrip("/") + "/details/experience/"
+                    page.goto(exp_url, wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(2000)
+                    # Scroll usando teclado para activar carga
+                    for _ in range(3):
+                        page.keyboard.press("PageDown")
+                        page.wait_for_timeout(600)
+                    # Extraer texto del contenedor main o body
+                    main_text = page.locator("main").inner_text() or page.locator("body").inner_text()
+                    if len(main_text.strip()) > 100:
+                        profile_data["experience"] = main_text.strip()
+                        print("[Autocuración] Experiencia recuperada con éxito de la subpágina de detalles.")
+                except Exception as e:
+                    print(f"[Autocuración] Error al intentar recuperar experiencia: {e}")
+                    
+            # Autocuración: Si las habilidades están vacías, navegar directamente al sub-enlace de habilidades
+            if not profile_data["skills"] or len(profile_data["skills"].strip()) < 15:
+                print(f"[Autocuración] Habilidades vacías en página principal. Navegando a detalles de habilidades...")
+                try:
+                    skills_url = base_profile_url.rstrip("/") + "/details/skills/"
+                    page.goto(skills_url, wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(2000)
+                    for _ in range(3):
+                        page.keyboard.press("PageDown")
+                        page.wait_for_timeout(600)
+                    main_text = page.locator("main").inner_text() or page.locator("body").inner_text()
+                    if len(main_text.strip()) > 100:
+                        profile_data["skills"] = main_text.strip()
+                        print("[Autocuración] Habilidades recuperadas con éxito de la subpágina de detalles.")
+                except Exception as e:
+                    print(f"[Autocuración] Error al intentar recuperar habilidades: {e}")
+            
+            # Volver a la página principal del perfil o tomar el texto general acumulado
             # Si no pudimos obtener nada con selectores, extraemos el texto general del body como fallback
             try:
+                # Si terminamos en una subpágina de detalles, volver a la principal para dejar el navegador listo
+                if page.url != profile_url:
+                    page.goto(profile_url, wait_until="domcontentloaded", timeout=20000)
                 profile_data["raw_text"] = page.locator("body").inner_text()
             except Exception:
                 pass
