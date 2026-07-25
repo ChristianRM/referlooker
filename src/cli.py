@@ -3,7 +3,7 @@ import json
 import csv
 import time
 
-# Códigos de color ANSI para mejorar la estética en la terminal
+# ANSI color codes for styled console output
 RESET = "\033[0m"
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -14,18 +14,18 @@ MAGENTA = "\033[35m"
 WHITE = "\033[37m"
 
 def clear_screen():
-    """Limpia la consola dependiendo del sistema operativo."""
+    """Clears the console based on the operating system."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def print_header(title):
-    """Imprime un encabezado estilizado en la consola."""
+    """Prints a styled header to the console."""
     width = 70
     print("\n" + "=" * width)
     print(f"{BOLD}{CYAN}{title.center(width)}{RESET}")
     print("=" * width)
 
-def load_candidates(json_path="output/candidatos.json"):
-    """Carga los candidatos desde candidatos.json y los agrupa por vacante."""
+def load_candidates(json_path="output/candidates.json"):
+    """Loads candidates from candidates.json and groups them by vacancy."""
     if not os.path.exists(json_path):
         return {}
 
@@ -33,44 +33,44 @@ def load_candidates(json_path="output/candidatos.json"):
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        print(f"{RED}[Error] No se pudo leer {json_path}: {e}{RESET}")
+        print(f"{RED}[Error] Could not read {json_path}: {e}{RESET}")
         return {}
 
-    candidatos_deseables = data.get("candidatos_deseables", [])
-    candidatos_no_deseables = data.get("candidatos_no_deseables", [])
+    desirable_candidates = data.get("desirable_candidates", [])
+    undesirable_candidates = data.get("undesirable_candidates", [])
 
-    # Agrupar por vacante
+    # Group by vacancy
     vacancies = {}
     
     def add_to_group(cand_list, group_name):
         for cand in cand_list:
-            vac_name = cand.get("vacante", "Sin Vacante Asignada")
+            vac_name = cand.get("vacancy", "Unassigned Vacancy")
             if vac_name not in vacancies:
-                vacancies[vac_name] = {"deseables": [], "no_deseables": []}
-            # Asegurar tipo de score
+                vacancies[vac_name] = {"desirable": [], "undesirable": []}
+            # Ensure score is an integer
             try:
                 cand["score"] = int(cand.get("score", 0))
             except Exception:
                 cand["score"] = 0
             vacancies[vac_name][group_name].append(cand)
 
-    add_to_group(candidatos_deseables, "deseables")
-    add_to_group(candidatos_no_deseables, "no_deseables")
+    add_to_group(desirable_candidates, "desirable")
+    add_to_group(undesirable_candidates, "undesirable")
 
     return vacancies
 
 def print_candidates_table(candidates):
-    """Dibuja una tabla ASCII con los candidatos y retorna la lista mapeada por índice."""
+    """Draws an ASCII table of the candidates and returns a mapped list of candidates."""
     if not candidates:
-        print(f"{YELLOW}No se encontraron candidatos para mostrar con los filtros aplicados.{RESET}")
+        print(f"{YELLOW}No candidates found matching the active filters.{RESET}")
         return []
 
-    # Encabezado de la tabla
+    # Table headers
     col_idx = " # "
-    col_name = "Nombre"
+    col_name = "Name"
     col_score = "Score"
     col_otw = "OpenToWork"
-    col_loc = "Ubicación"
+    col_loc = "Location"
 
     print(f"+-----+---------------------------+-------+------------+---------------------------------+")
     print(f"|{BOLD}{WHITE}{col_idx:^3}{RESET}|{BOLD}{WHITE}{col_name:^27}{RESET}|{BOLD}{WHITE}{col_score:^7}{RESET}|{BOLD}{WHITE}{col_otw:^12}{RESET}|{BOLD}{WHITE}{col_loc:^33}{RESET}|")
@@ -79,16 +79,16 @@ def print_candidates_table(candidates):
     mapped = []
     for i, c in enumerate(candidates, 1):
         mapped.append(c)
-        name = c.get("nombre", "Desconocido")[:25]
+        name = c.get("name", "Unknown")[:25]
         score = c.get("score", 0)
-        open_to_work = "Sí" if c.get("open_to_work") else "No"
-        location = c.get("location", "No especificada")[:31]
+        open_to_work = "Yes" if c.get("open_to_work") else "No"
+        location = c.get("location", "Not specified")[:31]
 
-        # Formato de colores según score y disponibilidad
+        # Score and availability status colors
         score_color = GREEN if score >= 85 else (YELLOW if score >= 60 else RED)
         otw_color = GREEN if c.get("open_to_work") else RESET
         
-        # Formatear celdas con ancho fijo
+        # Format cells with fixed widths
         name_str = f"{name:<25}"
         score_str = f"{score:>4}%"
         otw_str = f"{open_to_work:^10}"
@@ -100,73 +100,72 @@ def print_candidates_table(candidates):
     return mapped
 
 def view_candidate_detail(candidate):
-    """Muestra la información detallada de un candidato seleccionado."""
+    """Displays detailed information for a selected candidate."""
     clear_screen()
-    print_header(f"Ficha Detallada: {candidate.get('nombre')}")
+    print_header(f"Detailed File: {candidate.get('name')}")
     
     score = candidate.get("score", 0)
     score_color = GREEN if score >= 85 else (YELLOW if score >= 60 else RED)
-    open_to_work = f"{GREEN}Sí (Búsqueda Activa){RESET}" if candidate.get("open_to_work") else "No / No detectado"
+    open_to_work = f"{GREEN}Yes (Active Search){RESET}" if candidate.get("open_to_work") else "No / Not detected"
 
-    print(f"{BOLD}Vacante Asociada:{RESET} {candidate.get('vacante')}")
-    print(f"{BOLD}URL LinkedIn:{RESET}     {candidate.get('linkedin_url')}")
-    print(f"{BOLD}Ubicación:{RESET}        {candidate.get('location')}")
-    print(f"{BOLD}Puntuación Match:{RESET} {score_color}{score}%{RESET}")
-    print(f"{BOLD}Open to Work:{RESET}     {open_to_work}")
-    print(f"{BOLD}Titular:{RESET}          {candidate.get('titular')}")
-    print(f"{BOLD}Fecha Registro:{RESET}   {candidate.get('timestamp', 'N/A')}")
+    print(f"{BOLD}Associated Vacancy:{RESET} {candidate.get('vacancy')}")
+    print(f"{BOLD}LinkedIn URL:{RESET}       {candidate.get('linkedin_url')}")
+    print(f"{BOLD}Location:{RESET}           {candidate.get('location')}")
+    print(f"{BOLD}Match Score:{RESET}        {score_color}{score}%{RESET}")
+    print(f"{BOLD}Open to Work:{RESET}       {open_to_work}")
+    print(f"{BOLD}Headline:{RESET}           {candidate.get('headline')}")
+    print(f"{BOLD}Registration Date:{RESET}  {candidate.get('timestamp', 'N/A')}")
     print("-" * 70)
     
-    print(f"{BOLD}{CYAN}[Resumen de Evaluación Ollama]{RESET}")
-    print(candidate.get("resumen_evaluacion", "Sin resumen de evaluación disponible."))
+    print(f"{BOLD}{CYAN}[Ollama Evaluation Summary]{RESET}")
+    print(candidate.get("evaluation_summary", "No evaluation summary available."))
     print("-" * 70)
 
-    # Mostrar secciones colapsables o simplificadas
-    print(f"{BOLD}{CYAN}[Acerca de / Extracto]{RESET}")
-    acerca = candidate.get("acerca_de", "").strip()
-    print(acerca if acerca else "Sección vacía o no disponible.")
+    # Display profile sections
+    print(f"{BOLD}{CYAN}[About / Summary]{RESET}")
+    about = candidate.get("about", "").strip()
+    print(about if about else "Section empty or not available.")
     print("-" * 70)
 
-    print(f"{BOLD}{CYAN}[Experiencia Profesional (Resumen)]{RESET}")
-    exp = candidate.get("experiencia", "").strip()
+    print(f"{BOLD}{CYAN}[Professional Experience (Summary)]{RESET}")
+    exp = candidate.get("experience", "").strip()
     if exp:
-        # Mostrar las primeras 15 líneas para no inundar la consola
+        # Display the first 15 lines to avoid flooding the console
         lines = exp.split('\n')
         if len(lines) > 15:
             print('\n'.join(lines[:15]))
-            print(f"{YELLOW}... [Perfil contiene {len(lines)} líneas de experiencia. Ver perfil de LinkedIn completo para más detalles] ...{RESET}")
+            print(f"{YELLOW}... [Profile contains {len(lines)} lines of experience. Visit full LinkedIn profile for more details] ...{RESET}")
         else:
             print(exp)
     else:
-        print("Sección vacía o no disponible.")
+        print("Section empty or not available.")
     print("-" * 70)
 
-    print(f"{BOLD}{CYAN}[Habilidades]{RESET}")
-    habs = candidate.get("habilidades", "").strip()
-    if habs:
-        # Formatear habilidades si vienen muy largas
-        lines = habs.split('\n')
+    print(f"{BOLD}{CYAN}[Skills]{RESET}")
+    skills_text = candidate.get("skills", "").strip()
+    if skills_text:
+        lines = skills_text.split('\n')
         skills = [l.strip() for l in lines if l.strip() and not l.strip().startswith("Skills") and not l.strip().startswith("All") and not l.strip().startswith("Tools") and not l.strip().startswith("Industry")]
         if skills:
             print(", ".join(skills[:30]))
             if len(skills) > 30:
-                print(f"{YELLOW}... y {len(skills) - 30} habilidades más.{RESET}")
+                print(f"{YELLOW}... and {len(skills) - 30} more skills.{RESET}")
         else:
-            print(habs[:300])
+            print(skills_text[:300])
     else:
-        print("Sección vacía o no disponible.")
+        print("Section empty or not available.")
     
     print("=" * 70)
-    input(f"\nPresiona {BOLD}[Enter]{RESET} para regresar a la lista de candidatos...")
+    input(f"\nPress {BOLD}[Enter]{RESET} to return to the candidate list...")
 
 def export_vacancy_to_csv(vac_name, candidates):
-    """Exporta los candidatos filtrados de una vacante a un archivo CSV."""
-    # Sanitizar el nombre del archivo
+    """Exports the filtered candidates of a specific vacancy to a CSV file."""
+    # Sanitize the file name
     safe_name = "".join(c for c in vac_name if c.isalnum() or c in (' ', '_', '-')).rstrip()
     safe_name = safe_name.replace(" ", "_")
     filename = f"output/{safe_name}_export.csv"
 
-    fieldnames = ["Nombre", "Score", "Open to Work", "LinkedIn URL", "Ubicación", "Titular", "Resumen Evaluación"]
+    fieldnames = ["Name", "Score", "Open to Work", "LinkedIn URL", "Location", "Headline", "Evaluation Summary"]
     
     try:
         with open(filename, "w", newline="", encoding="utf-8") as csvfile:
@@ -174,138 +173,138 @@ def export_vacancy_to_csv(vac_name, candidates):
             writer.writeheader()
             for c in candidates:
                 writer.writerow({
-                    "Nombre": c.get("nombre", ""),
+                    "Name": c.get("name", ""),
                     "Score": f"{c.get('score', 0)}%",
-                    "Open to Work": "Sí" if c.get("open_to_work") else "No",
+                    "Open to Work": "Yes" if c.get("open_to_work") else "No",
                     "LinkedIn URL": c.get("linkedin_url", ""),
-                    "Ubicación": c.get("location", ""),
-                    "Titular": c.get("titular", ""),
-                    "Resumen Evaluación": c.get("resumen_evaluacion", "")
+                    "Location": c.get("location", ""),
+                    "Headline": c.get("headline", ""),
+                    "Evaluation Summary": c.get("evaluation_summary", "")
                 })
-        print(f"\n{GREEN}[Éxito] Reporte exportado a: {os.path.abspath(filename)}{RESET}")
-        input(f"Presiona {BOLD}[Enter]{RESET} para continuar...")
+        print(f"\n{GREEN}[Success] Report exported to: {os.path.abspath(filename)}{RESET}")
+        input(f"Press {BOLD}[Enter]{RESET} to continue...")
     except Exception as e:
-        print(f"\n{RED}[Error] No se pudo exportar a CSV: {e}{RESET}")
-        input(f"Presiona {BOLD}[Enter]{RESET} para continuar...")
+        print(f"\n{RED}[Error] Could not export to CSV: {e}{RESET}")
+        input(f"Press {BOLD}[Enter]{RESET} to continue...")
 
 def filter_candidates_menu(all_candidates):
-    """Menú secundario para aplicar filtros sobre una lista de candidatos."""
+    """Secondary menu to apply filters to a list of candidates."""
     filtered = all_candidates.copy()
     
     while True:
         clear_screen()
-        print_header(f"Filtro de Candidatos (Resultados Actuales: {len(filtered)})")
+        print_header(f"Candidate Filters (Active Results: {len(filtered)})")
         
-        print("1. Filtrar por Score Mínimo")
-        print("2. Filtrar por estado 'Open to Work'")
-        print("3. Filtrar por Ubicación / País (Búsqueda por texto)")
-        print("4. Buscar palabra clave en Perfil (Nombre, Titular, Habilidades)")
-        print("5. Restablecer todos los filtros")
-        print("6. Ver candidatos resultantes")
-        print("q. Salir al menú de vacante")
+        print("1. Filter by Minimum Score")
+        print("2. Filter by 'Open to Work' status")
+        print("3. Filter by Location / Country (Text search)")
+        print("4. Search Keyword in Profile (Name, Headline, Skills)")
+        print("5. Reset all filters")
+        print("6. View result candidates")
+        print("q. Exit to vacancy menu")
         
-        opc = input(f"\nSeleccione una opción: ").strip()
+        opc = input(f"\nSelect an option: ").strip()
         
         if opc == "1":
             try:
-                min_score = int(input("Ingrese el score mínimo (0-100): ").strip())
+                min_score = int(input("Enter minimum score (0-100): ").strip())
                 filtered = [c for c in filtered if c.get("score", 0) >= min_score]
             except ValueError:
-                print(f"{RED}Valor inválido.{RESET}")
-                input("Presione Enter...")
+                print(f"{RED}Invalid value.{RESET}")
+                input("Press Enter...")
         elif opc == "2":
-            otw_input = input("¿Mostrar sólo candidatos Open to Work? (S/N): ").strip().lower()
-            if otw_input in ("s", "si", "y", "yes"):
+            otw_input = input("Show only Open to Work candidates? (Y/N): ").strip().lower()
+            if otw_input in ("y", "yes"):
                 filtered = [c for c in filtered if c.get("open_to_work")]
             elif otw_input in ("n", "no"):
                 filtered = [c for c in filtered if not c.get("open_to_work")]
         elif opc == "3":
-            loc_query = input("Ingrese país, estado o palabra clave de ubicación: ").strip().lower()
+            loc_query = input("Enter country, state, or city keyword: ").strip().lower()
             if loc_query:
                 filtered = [c for c in filtered if loc_query in c.get("location", "").lower()]
         elif opc == "4":
-            keyword = input("Ingrese término de búsqueda: ").strip().lower()
+            keyword = input("Enter search term: ").strip().lower()
             if keyword:
                 filtered = [c for c in filtered if (
-                    keyword in c.get("nombre", "").lower() or
-                    keyword in c.get("titular", "").lower() or
-                    keyword in c.get("habilidades", "").lower() or
-                    keyword in c.get("experiencia", "").lower() or
-                    keyword in c.get("acerca_de", "").lower()
+                    keyword in c.get("name", "").lower() or
+                    keyword in c.get("headline", "").lower() or
+                    keyword in c.get("skills", "").lower() or
+                    keyword in c.get("experience", "").lower() or
+                    keyword in c.get("about", "").lower()
                 )]
         elif opc == "5":
             filtered = all_candidates.copy()
-            print(f"{GREEN}Filtros restablecidos.{RESET}")
-            input("Presione Enter...")
+            print(f"{GREEN}Filters reset.{RESET}")
+            input("Press Enter...")
         elif opc == "6":
-            # Mostrar la tabla resultante directamente desde el filtro
+            # Display the resulting table directly
             clear_screen()
-            print_header(f"Candidatos Filtrados ({len(filtered)})")
+            print_header(f"Filtered Candidates ({len(filtered)})")
             mapped = print_candidates_table(filtered)
             if mapped:
-                idx = input(f"\nIngrese el número de candidato para ver detalle o {BOLD}[Enter]{RESET} para regresar: ").strip()
+                idx = input(f"\nEnter candidate number to view details or {BOLD}[Enter]{RESET} to return: ").strip()
                 if idx.isdigit() and 1 <= int(idx) <= len(mapped):
                     view_candidate_detail(mapped[int(idx) - 1])
             else:
-                input("\nPresione Enter para regresar...")
+                input("\nPress Enter to return...")
         elif opc.lower() == "q":
             break
             
     return filtered
 
 def manage_vacancy_candidates(vac_name, data):
-    """Menú para administrar/visualizar los candidatos de una vacante específica."""
-    deseables = data.get("deseables", [])
-    no_deseables = data.get("no_deseables", [])
-    all_cands = deseables + no_deseables
+    """Menu to manage/visualize the candidates of a specific vacancy."""
+    desirable = data.get("desirable", [])
+    undesirable = data.get("undesirable", [])
+    all_cands = desirable + undesirable
     
-    # Ordenar por score descendente por defecto
+    # Sort by score descending by default
     all_cands.sort(key=lambda x: x.get("score", 0), reverse=True)
     
     current_list = all_cands.copy()
 
     while True:
         clear_screen()
-        print_header(f"Vacante: {vac_name}")
-        print(f"Resumen de candidatos:")
-        print(f"- Deseables (Score >= 85): {GREEN}{len(deseables)}{RESET}")
-        print(f"- No Deseables (Score < 85): {RED}{len(no_deseables)}{RESET}")
-        print(f"- Visualizando actualmente: {BOLD}{len(current_list)}{RESET} candidatos\n")
+        print_header(f"Vacancy: {vac_name}")
+        print(f"Candidates summary:")
+        print(f"- Desirable (Score >= 85): {GREEN}{len(desirable)}{RESET}")
+        print(f"- Undesirable (Score < 85): {RED}{len(undesirable)}{RESET}")
+        print(f"- Currently viewing: {BOLD}{len(current_list)}{RESET} candidates\n")
 
-        print("1. Ver Todos los candidatos")
-        print("2. Ver sólo candidatos Deseables")
-        print("3. Ver sólo candidatos No Deseables")
-        print("4. Aplicar Filtros Avanzados y Búsqueda")
-        print("5. Exportar esta lista a CSV")
-        print("q. Regresar al menú anterior")
+        print("1. View All candidates")
+        print("2. View only Desirable candidates")
+        print("3. View only Undesirable candidates")
+        print("4. Apply Advanced Filters and Search")
+        print("5. Export this list to CSV")
+        print("q. Go back to previous menu")
         
-        opc = input(f"\nSeleccione una opción: ").strip()
+        opc = input(f"\nSelect an option: ").strip()
 
         if opc == "1":
             current_list = all_cands.copy()
             clear_screen()
-            print_header(f"Todos los Candidatos ({len(current_list)})")
+            print_header(f"All Candidates ({len(current_list)})")
             mapped = print_candidates_table(current_list)
             if mapped:
-                idx = input(f"\nIngrese el número de candidato para ver detalle o {BOLD}[Enter]{RESET} para regresar: ").strip()
+                idx = input(f"\nEnter candidate number to view details or {BOLD}[Enter]{RESET} to return: ").strip()
                 if idx.isdigit() and 1 <= int(idx) <= len(mapped):
                     view_candidate_detail(mapped[int(idx) - 1])
         elif opc == "2":
-            current_list = deseables.copy()
+            current_list = desirable.copy()
             clear_screen()
-            print_header(f"Candidatos Deseables ({len(current_list)})")
+            print_header(f"Desirable Candidates ({len(current_list)})")
             mapped = print_candidates_table(current_list)
             if mapped:
-                idx = input(f"\nIngrese el número de candidato para ver detalle o {BOLD}[Enter]{RESET} para regresar: ").strip()
+                idx = input(f"\nEnter candidate number to view details or {BOLD}[Enter]{RESET} to return: ").strip()
                 if idx.isdigit() and 1 <= int(idx) <= len(mapped):
                     view_candidate_detail(mapped[int(idx) - 1])
         elif opc == "3":
-            current_list = no_deseables.copy()
+            current_list = undesirable.copy()
             clear_screen()
-            print_header(f"Candidatos No Deseables ({len(current_list)})")
+            print_header(f"Undesirable Candidates ({len(current_list)})")
             mapped = print_candidates_table(current_list)
             if mapped:
-                idx = input(f"\nIngrese el número de candidato para ver detalle o {BOLD}[Enter]{RESET} para regresar: ").strip()
+                idx = input(f"\nEnter candidate number to view details or {BOLD}[Enter]{RESET} to return: ").strip()
                 if idx.isdigit() and 1 <= int(idx) <= len(mapped):
                     view_candidate_detail(mapped[int(idx) - 1])
         elif opc == "4":
@@ -316,31 +315,31 @@ def manage_vacancy_candidates(vac_name, data):
             break
 
 def run_cli():
-    """Inicia el bucle principal del CLI de candidatos."""
+    """Starts the main loop of the candidate browser CLI."""
     while True:
         clear_screen()
-        print_header("ReferLooker - Navegador y Filtro de Candidatos")
+        print_header("ReferLooker - Candidate Browser and Filter")
         
         vacancies = load_candidates()
         
         if not vacancies:
-            print(f"\n{YELLOW}No se encontraron registros de candidatos en 'output/candidatos.json'.{RESET}")
-            print("Asegúrate de procesar vacantes primero para poblar la base de datos.")
-            input(f"\nPresiona {BOLD}[Enter]{RESET} para regresar...")
+            print(f"\n{YELLOW}No candidate records found in 'output/candidates.json'.{RESET}")
+            print("Make sure to process vacancies first to populate the database.")
+            input(f"\nPress {BOLD}[Enter]{RESET} to return...")
             break
 
-        print("Selecciona una vacante para explorar sus candidatos:\n")
+        print("Select a vacancy to explore its candidates:\n")
         
         mapped_vacs = []
         for i, (vac_name, data) in enumerate(vacancies.items(), 1):
             mapped_vacs.append((vac_name, data))
-            num_des = len(data["deseables"])
-            num_ndes = len(data["no_deseables"])
-            print(f"{BOLD}{i:>2}.{RESET} {vac_name:<60} [{GREEN}{num_des} Deseables{RESET} | {RED}{num_ndes} No Deseables{RESET}]")
+            num_des = len(data["desirable"])
+            num_ndes = len(data["undesirable"])
+            print(f"{BOLD}{i:>2}.{RESET} {vac_name:<60} [{GREEN}{num_des} Desirable{RESET} | {RED}{num_ndes} Undesirable{RESET}]")
 
-        print(f"\n{BOLD} q.{RESET} Volver al menú principal")
+        print(f"\n{BOLD} q.{RESET} Back to main menu")
 
-        selection = input(f"\nSelecciona una opción: ").strip()
+        selection = input(f"\nSelect an option: ").strip()
 
         if selection.lower() == 'q':
             break
@@ -351,13 +350,11 @@ def run_cli():
                 vac_name, data = mapped_vacs[idx - 1]
                 manage_vacancy_candidates(vac_name, data)
             else:
-                print(f"{RED}Opción inválida. Reintente.{RESET}")
+                print(f"{RED}Invalid option. Retry.{RESET}")
                 time.sleep(1)
         else:
-            print(f"{RED}Opción inválida. Reintente.{RESET}")
+            print(f"{RED}Invalid option. Retry.{RESET}")
             time.sleep(1)
 
 if __name__ == "__main__":
-    import time
-    # Si se ejecuta directamente, iniciar CLI
     run_cli()

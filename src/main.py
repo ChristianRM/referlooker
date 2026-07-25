@@ -4,7 +4,7 @@ import json
 import shutil
 import pandas as pd
 
-# Añadir directorio actual al path por si acaso
+# Add current directory to path just in case
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from query_generator import generate_search_query, generate_refined_search_query
@@ -29,41 +29,41 @@ class Tee:
         self.file.flush()
 
 def load_config():
-    """Carga config.json si existe."""
+    """Loads config.json if it exists."""
     config_path = "config.json"
     if not os.path.exists(config_path):
-        print(f"[Error] No se encontró el archivo de configuración {config_path}")
+        print(f"[Error] Configuration file not found at {config_path}")
         sys.exit(1)
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def setup_directories():
-    """Crea los directorios necesarios si no existen."""
-    os.makedirs("vacantes", exist_ok=True)
-    os.makedirs("procesadas/vacantes_viejas", exist_ok=True)
+    """Creates the necessary directories if they do not exist."""
+    os.makedirs("vacancies", exist_ok=True)
+    os.makedirs("processed/archived_vacancies", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
 def load_processed_urls() -> dict:
-    """Carga el historial de URLs procesadas para evitar repetirlas."""
+    """Loads the history of processed URLs to avoid duplicates."""
     history_path = "output/processed_urls.json"
     if os.path.exists(history_path):
         try:
             with open(history_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            print("[Advertencia] No se pudo leer processed_urls.json. Se creará uno nuevo.")
+            print("[Warning] Could not read processed_urls.json. A new one will be created.")
             return {}
     return {}
 
 def save_processed_urls(processed_dict: dict):
-    """Guarda el historial de URLs procesadas."""
+    """Saves the history of processed URLs."""
     history_path = "output/processed_urls.json"
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(processed_dict, f, indent=2, ensure_ascii=False)
 
 def update_excel_report(candidate_info: dict, excel_path: str):
-    """Inserta o actualiza un candidato en el reporte de Excel."""
-    columns = ["Vacante Asociada", "Candidato / Titular", "Score", "Resumen de Evaluación (LLM)", "URL LinkedIn", "Estado"]
+    """Inserts or updates a candidate in the Excel report."""
+    columns = ["Associated Vacancy", "Candidate / Headline", "Score", "Evaluation Summary (LLM)", "LinkedIn URL", "Status"]
     
     if os.path.exists(excel_path):
         try:
@@ -73,29 +73,27 @@ def update_excel_report(candidate_info: dict, excel_path: str):
     else:
         df = pd.DataFrame(columns=columns)
         
-    url = candidate_info.get("URL LinkedIn")
+    url = candidate_info.get("LinkedIn URL")
     if not url:
         return
         
-    exists = df["URL LinkedIn"] == url
-    
+    exists = df["LinkedIn URL"] == url
     new_row = pd.DataFrame([candidate_info])
     
     if exists.any():
-        # Actualizar fila existente
+        # Update existing row
         idx = df[exists].index[0]
         for col in columns:
             df.at[idx, col] = candidate_info[col]
     else:
-        # Concatenar la nueva fila
+        # Append the new row
         df = pd.concat([df, new_row], ignore_index=True)
         
     df.to_excel(excel_path, index=False)
 
-
 def regenerate_reports(excel_path: str, txt_path: str):
     """
-    Ordena y regenera los reportes a partir del archivo Excel.
+    Sorts and regenerates the reports based on the Excel file.
     """
     if not os.path.exists(excel_path):
         return
@@ -105,55 +103,54 @@ def regenerate_reports(excel_path: str, txt_path: str):
         if df.empty:
             return
             
-        # Crear columna numérica temporal para ordenar el Score (ej: "94%" -> 94)
+        # Create a temporary numeric column for sorting the Score (e.g., "94%" -> 94.0)
         df["Score_Num"] = df["Score"].astype(str).str.rstrip("%").astype(float, errors="ignore")
         
-        # Ordenar por Vacante (alfabético) y luego por Score_Num (descendente)
-        df = df.sort_values(by=["Vacante Asociada", "Score_Num"], ascending=[True, False])
+        # Sort by Vacancy (alphabetical) and then by Score_Num (descending)
+        df = df.sort_values(by=["Associated Vacancy", "Score_Num"], ascending=[True, False])
         df = df.drop(columns=["Score_Num"])
         
-        # Guardar archivo Excel ordenado
+        # Save sorted Excel file
         df.to_excel(excel_path, index=False)
         
-        # Escribir reporte en TXT
+        # Write consolidated report in TXT format
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write("============================================================\n")
-            f.write("      REPORTE CONSOLIDADO DE CANDIDATOS DESEABLES\n")
+            f.write("      CONSOLIDATED REPORT OF DESIRABLE CANDIDATES\n")
             f.write("============================================================\n")
-            f.write(f"Total Candidatos: {len(df)}\n")
+            f.write(f"Total Candidates: {len(df)}\n")
             
             current_vacancy = None
             for _, row in df.iterrows():
-                vac = row["Vacante Asociada"]
+                vac = row["Associated Vacancy"]
                 if vac != current_vacancy:
                     current_vacancy = vac
                     f.write(f"\n============================================================\n")
-                    f.write(f"VACANTE: {current_vacancy}\n")
+                    f.write(f"VACANCY: {current_vacancy}\n")
                     f.write(f"============================================================\n")
                 
-                f.write(f"Candidato: {row['Candidato / Titular']}\n")
+                f.write(f"Candidate: {row['Candidate / Headline']}\n")
                 f.write(f"Score: {row['Score']}\n")
-                f.write(f"LinkedIn: {row['URL LinkedIn']}\n")
-                f.write(f"Estado: {row['Estado']}\n")
-                f.write(f"Resumen de Evaluación: {row['Resumen de Evaluación (LLM)']}\n")
+                f.write(f"LinkedIn: {row['LinkedIn URL']}\n")
+                f.write(f"Status: {row['Status']}\n")
+                f.write(f"Evaluation Summary: {row['Evaluation Summary (LLM)']}\n")
                 f.write(f"------------------------------------------------------------\n")
                 
-        print(f"[Reporte] Reportes actualizados con éxito en 'output/'.")
+        print(f"[Report] Reports successfully updated in 'output/'.")
     except Exception as e:
-        print(f"[Error] No se pudieron regenerar los reportes: {e}")
-
+        print(f"[Error] Could not regenerate reports: {e}")
 
 def update_json_report(candidate_info: dict):
     """
-    Agrega o actualiza un candidato en el archivo consolidado de candidatos (output/candidatos.json).
-    Clasifica en 'candidatos_deseables' si el score es >= 85%, de lo contrario en 'candidatos_no_deseables'.
+    Adds or updates a candidate in the consolidated JSON database (output/candidates.json).
+    Classifies in 'desirable_candidates' if score is >= 85%, else in 'undesirable_candidates'.
     """
-    json_path = "output/candidatos.json"
+    json_path = "output/candidates.json"
     
-    # Inicializar estructura vacía del reporte
+    # Initialize empty structure
     report = {
-        "candidatos_deseables": [],
-        "candidatos_no_deseables": []
+        "desirable_candidates": [],
+        "undesirable_candidates": []
     }
     
     if os.path.exists(json_path):
@@ -161,99 +158,97 @@ def update_json_report(candidate_info: dict):
             with open(json_path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
                 if isinstance(loaded, dict):
-                    report["candidatos_deseables"] = loaded.get("candidatos_deseables", [])
-                    report["candidatos_no_deseables"] = loaded.get("candidatos_no_deseables", [])
+                    report["desirable_candidates"] = loaded.get("desirable_candidates", [])
+                    report["undesirable_candidates"] = loaded.get("undesirable_candidates", [])
         except Exception:
             pass
             
     url = candidate_info.get("linkedin_url")
     
-    # Remover duplicados previos del mismo candidato en ambas listas
-    report["candidatos_deseables"] = [c for c in report["candidatos_deseables"] if c.get("linkedin_url") != url]
-    report["candidatos_no_deseables"] = [c for c in report["candidatos_no_deseables"] if c.get("linkedin_url") != url]
+    # Remove previous duplicates of the same candidate from both lists
+    report["desirable_candidates"] = [c for c in report["desirable_candidates"] if c.get("linkedin_url") != url]
+    report["undesirable_candidates"] = [c for c in report["undesirable_candidates"] if c.get("linkedin_url") != url]
     
     score = candidate_info.get("score", 0)
     
-    # Guardar en la lista correspondiente
+    # Save into the corresponding category list
     if score >= 85:
-        report["candidatos_deseables"].append(candidate_info)
-        print(f"[Reporte JSON] Candidato '{candidate_info.get('nombre')}' agregado a 'candidatos_deseables' (Score: {score}%)")
+        report["desirable_candidates"].append(candidate_info)
+        print(f"[JSON Database] Candidate '{candidate_info.get('name')}' added to 'desirable_candidates' (Score: {score}%)")
     else:
-        report["candidatos_no_deseables"].append(candidate_info)
-        print(f"[Reporte JSON] Candidato '{candidate_info.get('nombre')}' agregado a 'candidatos_no_deseables' (Score: {score}%)")
+        report["undesirable_candidates"].append(candidate_info)
+        print(f"[JSON Database] Candidate '{candidate_info.get('name')}' added to 'undesirable_candidates' (Score: {score}%)")
         
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
-    # Si supera el score mínimo de deseables, actualizar reportes de Excel y TXT
+    # If it meets the threshold, update the Excel and TXT reports
     if score >= 85:
         excel_record = {
-            "Vacante Asociada": candidate_info.get("vacante", "Desconocido"),
-            "Candidato / Titular": f"{candidate_info.get('nombre', 'Desconocido')} | {candidate_info.get('titular', 'Sin titular')}",
+            "Associated Vacancy": candidate_info.get("vacancy", "Unknown"),
+            "Candidate / Headline": f"{candidate_info.get('name', 'Unknown')} | {candidate_info.get('headline', 'No headline')}",
             "Score": f"{score}%",
-            "Resumen de Evaluación (LLM)": candidate_info.get("resumen_evaluacion", ""),
-            "URL LinkedIn": url,
-            "Estado": "Pendiente"
+            "Evaluation Summary (LLM)": candidate_info.get("evaluation_summary", ""),
+            "LinkedIn URL": url,
+            "Status": "Pending"
         }
-        update_excel_report(excel_record, "output/candidatos_deseables.xlsx")
-        regenerate_reports("output/candidatos_deseables.xlsx", "output/candidatos_deseables.txt")
-
+        update_excel_report(excel_record, "output/desirable_candidates.xlsx")
+        regenerate_reports("output/desirable_candidates.xlsx", "output/desirable_candidates.txt")
 
 def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_history: dict):
-    """Procesa una única vacante (generación de query, búsqueda, scraping, evaluación)."""
+    """Processes a single vacancy (query generation, search, scraping, evaluation)."""
     vac_path = os.path.join(vac_folder, vac_file)
     print(f"\n" + "-" * 50)
-    print(f"Procesando vacante: {vac_file} desde '{vac_folder}'")
+    print(f"Processing vacancy: {vac_file} from '{vac_folder}'")
     print("-" * 50)
     
     with open(vac_path, "r", encoding="utf-8") as f:
         vacancy_text = f.read().strip()
         
     if not vacancy_text:
-        print(f"[Advertencia] El archivo {vac_file} está vacío. Omitiendo.")
+        print(f"[Warning] Vacancy file {vac_file} is empty. Skipping.")
         return
         
-    # 1. Generar la consulta X-Ray con el LLM
-    print("Generando consulta X-Ray con Ollama...")
+    # 1. Generate Google X-Ray search query with local LLM
+    print("Generating X-Ray search query with Ollama...")
     analysis = generate_search_query(vacancy_text, config)
-    role = analysis.get("role", "Desconocido")
+    role = analysis.get("role", "Unknown")
     query = analysis.get("search_query", "")
     target_country = analysis.get("target_country", "Any")
     
-    print(f"Rol detectado: {role}")
-    print(f"País objetivo de la vacante: {target_country}")
-    print(f"Query generada: {query}")
+    print(f"Role detected: {role}")
+    print(f"Target country for vacancy: {target_country}")
+    print(f"Generated query: {query}")
     
     if not query:
-        print("[Error] No se pudo generar una consulta de búsqueda válida. Omitiendo vacante.")
+        print("[Error] Could not generate a valid search query. Skipping vacancy.")
         return
         
     satisfied = False
     refined_query = query
     
     while not satisfied:
-        # Contar cuántos candidatos se han procesado previamente para esta vacante para paginar (start_offset)
+        # Determine current search offset based on previously processed candidates for this vacancy
         start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
         candidate_urls = search_candidates(refined_query, config, start_offset=start_offset)
         
         if not candidate_urls:
-            print(f"[Advertencia] No se encontraron perfiles de LinkedIn con la consulta actual.")
+            print(f"[Warning] No LinkedIn profiles found with the current query.")
         else:
-            # 3. Asegurar que la sesión de LinkedIn esté iniciada (asistiendo de forma visible si expiró)
+            # Verify that the LinkedIn session is active (assisting visibly if expired)
             if any(url not in processed_history for url in candidate_urls):
                 ensure_linkedin_session(config)
                 
-            # 4. Scrapear y evaluar candidatos
+            # Scrape and evaluate candidates
             for url in candidate_urls:
-                # Evitar reprocesar candidatos ya evaluados para esta vacante
                 if url in processed_history:
-                    print(f"[Saltado] Candidato ya procesado anteriormente: {url}")
+                    print(f"[Skipped] Candidate already processed: {url}")
                     continue
                     
-                # Scrapear perfil (pasando target_country para filtrado en Fase 1)
+                # Scrape profile (includes Phase 1 country check)
                 profile = scrape_linkedin_profile(url, target_country, config)
                 
-                # Registrar URL en el historial
+                # Register URL in history logs
                 processed_history[url] = {
                     "vacante": vac_file,
                     "status": profile["status"],
@@ -262,133 +257,132 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                 }
                 save_processed_urls(processed_history)
                 
-                # Si se descartó por ubicación en Fase 1
+                # If discarded in Phase 1 due to location mismatch
                 if profile["status"] == "location_mismatch":
                     candidate_record = {
-                        "vacante": vac_file,
-                        "nombre": profile["name"] or "Desconocido",
-                        "titular": profile["headline"] or "Sin titular",
+                        "vacancy": vac_file,
+                        "name": profile["name"] or "Unknown",
+                        "headline": profile["headline"] or "No headline",
                         "score": 0,
                         "open_to_work": False,
-                        "resumen_evaluacion": f"Descartado automáticamente por Ollama: ubicación fuera del país. (Ubicación: '{profile.get('location')}', Vacante requiere: '{target_country}').",
+                        "evaluation_summary": f"Automatically discarded: location mismatch. (Candidate location: '{profile.get('location')}', Job requires: '{target_country}').",
                         "linkedin_url": url,
-                        "location": profile.get("location") or "No especificada",
-                        "acerca_de": profile.get("about") or "",
-                        "experiencia": profile.get("experience") or "",
-                        "habilidades": profile.get("skills") or "",
+                        "location": profile.get("location") or "Not specified",
+                        "about": profile.get("about") or "",
+                        "experience": profile.get("experience") or "",
+                        "skills": profile.get("skills") or "",
                         "timestamp": pd.Timestamp.now().isoformat()
                     }
                     update_json_report(candidate_record)
                     continue
                     
-                # Si hubo otro error en el scraper
+                # If scraping error occurred
                 if profile["status"] != "success":
-                    print(f"[Error Scraper] No se pudo procesar {url}: {profile['error_message']}")
+                    print(f"[Scraper Error] Could not process {url}: {profile['error_message']}")
                     candidate_record = {
-                        "vacante": vac_file,
-                        "nombre": profile["name"] or "Desconocido",
-                        "titular": profile["headline"] or "Sin titular",
+                        "vacancy": vac_file,
+                        "name": profile["name"] or "Unknown",
+                        "headline": profile["headline"] or "No headline",
                         "score": 0,
                         "open_to_work": False,
-                        "resumen_evaluacion": f"Error al scrapear perfil: {profile['error_message']}",
+                        "evaluation_summary": f"Scraping error: {profile['error_message']}",
                         "linkedin_url": url,
-                        "location": profile.get("location") or "No especificada",
-                        "acerca_de": profile.get("about") or "",
-                        "experiencia": profile.get("experience") or "",
-                        "habilidades": profile.get("skills") or "",
+                        "location": profile.get("location") or "Not specified",
+                        "about": profile.get("about") or "",
+                        "experience": profile.get("experience") or "",
+                        "skills": profile.get("skills") or "",
                         "timestamp": pd.Timestamp.now().isoformat()
                     }
                     update_json_report(candidate_record)
                     continue
                     
-                # Evaluar match completo con Ollama
-                print(f"Evaluando perfil de '{profile['name']}' contra la vacante...")
+                # Perform full profile evaluation with Ollama
+                print(f"Evaluating candidate profile '{profile['name']}' against job description...")
                 evaluation = evaluate_candidate(profile, vacancy_text, config)
                 score = evaluation["match_score"]
                 open_to_work = evaluation["open_to_work"]
-                eval_resumen = evaluation["resumen_evaluacion"]
+                eval_summary = evaluation["evaluation_summary"]
                 
-                print(f"--> Puntuación Match: {score}% | OpenToWork: {open_to_work}")
+                print(f"--> Match Score: {score}% | OpenToWork: {open_to_work}")
                 
-                # Registrar record en JSON consolidado
+                # Save structured JSON candidate details
                 candidate_record = {
-                    "vacante": vac_file,
-                    "nombre": profile["name"] or "Desconocido",
-                    "titular": profile["headline"] or "Sin titular",
+                    "vacancy": vac_file,
+                    "name": profile["name"] or "Unknown",
+                    "headline": profile["headline"] or "No headline",
                     "score": int(score),
                     "open_to_work": bool(open_to_work),
-                    "resumen_evaluacion": eval_resumen,
+                    "evaluation_summary": eval_summary,
                     "linkedin_url": url,
-                    "location": profile.get("location") or "No especificada",
-                    "acerca_de": profile.get("about") or "",
-                    "experiencia": profile.get("experience") or "",
-                    "habilidades": profile.get("skills") or "",
+                    "location": profile.get("location") or "Not specified",
+                    "about": profile.get("about") or "",
+                    "experience": profile.get("experience") or "",
+                    "skills": profile.get("skills") or "",
                     "timestamp": pd.Timestamp.now().isoformat()
                 }
                 update_json_report(candidate_record)
-
-        # Mostrar resumen interactivo de candidatos para esta vacante hasta ahora
+                
+        # Show interactive summary of candidates processed for this vacancy
         print(f"\n" + "=" * 60)
-        print(f"   RESUMEN DE CANDIDATOS PARA LA VACANTE: {vac_file}")
-        print(f"   (País requerido: {target_country})")
+        print(f"   CANDIDATE SUMMARY FOR VACANCY: {vac_file}")
+        print(f"   (Required Country: {target_country})")
         print(f"=" * 60)
         
         vacancy_candidates = []
-        if os.path.exists("output/candidatos.json"):
+        if os.path.exists("output/candidates.json"):
             try:
-                with open("output/candidatos.json", "r", encoding="utf-8") as f:
+                with open("output/candidates.json", "r", encoding="utf-8") as f:
                     report = json.load(f)
-                    all_cands = report.get("candidatos_deseables", []) + report.get("candidatos_no_deseables", [])
-                    vacancy_candidates = [c for c in all_cands if c.get("vacante") == vac_file]
+                    all_cands = report.get("desirable_candidates", []) + report.get("undesirable_candidates", [])
+                    vacancy_candidates = [c for c in all_cands if c.get("vacancy") == vac_file]
             except Exception:
                 pass
         
         if vacancy_candidates:
-            # Ordenar por score descendente
+            # Sort by score descending
             vacancy_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
             for c in vacancy_candidates:
-                print(f"- {c.get('nombre')} | Score: {c.get('score')}% | Ubicación: {c.get('location')} | URL: {c.get('linkedin_url')}")
+                print(f"- {c.get('name')} | Score: {c.get('score')}% | Location: {c.get('location')} | URL: {c.get('linkedin_url')}")
         else:
-            print("No hay candidatos procesados para esta vacante aún.")
+            print("No candidates processed for this vacancy yet.")
         print("=" * 60)
         
-        satisfy_input = input(f"\n¿Estás satisfecho con los resultados obtenidos para la vacante '{vac_file}'? (S/N) [S]: ").strip().lower()
-        if satisfy_input in ("", "s", "si", "yes"):
+        satisfy_input = input(f"\nAre you satisfied with the results obtained for vacancy '{vac_file}'? (Y/N) [Y]: ").strip().lower()
+        if satisfy_input in ("", "y", "yes"):
             satisfied = True
-            # Mover al histórico si viene de la carpeta vacantes activas
-            if vac_folder == "vacantes":
-                dest_path = os.path.join("procesadas/vacantes_viejas", vac_file)
+            # Move to history if processed from the active vacancies folder
+            if vac_folder == "vacancies":
+                dest_path = os.path.join("processed/archived_vacancies", vac_file)
                 try:
                     if os.path.exists(dest_path):
                         os.remove(dest_path)
                     shutil.move(vac_path, dest_path)
-                    print(f"Archivo de vacante movido a históricos: {dest_path}")
+                    print(f"Vacancy file archived to: {dest_path}")
                 except Exception as e:
-                    print(f"[Error] No se pudo mover la vacante a históricos: {e}")
+                    print(f"[Error] Could not archive vacancy file: {e}")
             else:
-                print(f"[Info] Manteniendo la vacante archivada en su histórico: {vac_path}")
+                print(f"[Info] Keeping vacancy in archived history: {vac_path}")
         else:
-            refine_input = input("¿Deseas que Ollama auto-refine la consulta de búsqueda para encontrar más candidatos? (S/N) [S]: ").strip().lower()
-            if refine_input in ("", "s", "si", "yes"):
-                print("Pidiendo a Ollama que auto-refine la consulta de búsqueda...")
+            refine_input = input("Would you like Ollama to auto-refine the search query to find more candidates? (Y/N) [Y]: ").strip().lower()
+            if refine_input in ("", "y", "yes"):
+                print("Requesting query refinement from Ollama...")
                 new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
                 if new_refined:
-                    print(f"\n--> Ollama generó la siguiente consulta refinada:\n{new_refined}")
-                    use_refined = input("¿Deseas ejecutar la búsqueda con esta consulta refinada? (S/N) [S]: ").strip().lower()
-                    if use_refined in ("", "s", "si", "yes"):
+                    print(f"\n--> Ollama generated the following refined query:\n{new_refined}")
+                    use_refined = input("Would you like to execute the search with this refined query? (Y/N) [Y]: ").strip().lower()
+                    if use_refined in ("", "y", "yes"):
                         refined_query = new_refined
                     else:
-                        print("[Info] No se aplicó el refinamiento. Reintentando con consulta anterior.")
+                        print("[Info] Refined query discarded. Retrying with previous query.")
                 else:
-                    print("[Advertencia] Ollama no pudo generar una consulta refinada. Reintentando con consulta anterior.")
+                    print("[Warning] Ollama could not generate a refined query. Retrying with previous query.")
             else:
-                print(f"[Info] Manteniendo la vacante '{vac_file}' en '{vac_folder}' para futuras corridas.")
+                print(f"[Info] Leaving vacancy '{vac_file}' in '{vac_folder}' for future execution runs.")
                 break
-
 
 def main():
     setup_directories()
-    # Inicializar Tee para escribir a consola y archivo de log
+    # Initialize Tee to log terminal outputs to file
     tee = Tee("output/referral_bot.log", mode="w")
     sys.stdout = tee
     sys.stderr = tee
@@ -396,42 +390,41 @@ def main():
     config = load_config()
     
     while True:
-        # Imprimir menú en stdout normal (para que no salga repetido por Tee o si deseamos visualización en pantalla)
         print("\n" + "=" * 60)
-        print("                 REFERLOOKER - MENÚ PRINCIPAL")
+        print("                 REFERLOOKER - MAIN MENU")
         print("=" * 60)
-        print("1. Procesar vacantes abiertas (carpeta 'vacantes/')")
-        print("2. Reanudar búsqueda de vacantes procesadas (carpeta 'procesadas/vacantes_viejas/')")
-        print("3. Navegar y filtrar candidatos (CLI interactivo)")
-        print("q. Salir")
+        print("1. Process open vacancies (folder 'vacancies/')")
+        print("2. Resume search for processed vacancies (folder 'processed/archived_vacancies/')")
+        print("3. Browse and filter candidates (interactive CLI)")
+        print("q. Quit")
         print("=" * 60)
         
-        opc = input("Seleccione una opción: ").strip()
+        opc = input("Select an option: ").strip()
         
         if opc == "1":
-            vacancy_files = [f for f in os.listdir("vacantes") if f.endswith(".txt")]
+            vacancy_files = [f for f in os.listdir("vacancies") if f.endswith(".txt")]
             if not vacancy_files:
-                print("\nNo se encontraron archivos de vacantes (.txt) en la carpeta 'vacantes/'.")
-                print("Coloca descripciones de puestos allí y vuelve a ejecutar.")
+                print("\nNo vacancy descriptions (.txt) found in the 'vacancies/' folder.")
+                print("Drop vacancy description files in the folder and try again.")
                 continue
                 
-            print(f"\nIniciando procesamiento de {len(vacancy_files)} vacante(s) abierta(s)...")
+            print(f"\nStarting processing of {len(vacancy_files)} open vacancy(ies)...")
             for vac_file in vacancy_files:
                 processed_history = load_processed_urls()
-                process_vacancy(vac_file, "vacantes", config, processed_history)
+                process_vacancy(vac_file, "vacancies", config, processed_history)
                 
         elif opc == "2":
-            history_files = [f for f in os.listdir("procesadas/vacantes_viejas") if f.endswith(".txt")]
+            history_files = [f for f in os.listdir("processed/archived_vacancies") if f.endswith(".txt")]
             if not history_files:
-                print("\nNo se encontraron vacantes procesadas en 'procesadas/vacantes_viejas/'.")
+                print("\nNo archived vacancies found in 'processed/archived_vacancies/'.")
                 continue
                 
-            print("\nSeleccione la vacante que desea reanudar:")
+            print("\nSelect the vacancy you wish to resume:")
             for idx, file in enumerate(history_files, 1):
                 print(f"{idx}. {file}")
-            print("q. [Volver al menú principal]")
+            print("q. [Back to main menu]")
             
-            sel = input("\nOpción: ").strip()
+            sel = input("\nOption: ").strip()
             if sel.lower() == 'q':
                 continue
             elif sel.isdigit():
@@ -439,22 +432,23 @@ def main():
                 if 1 <= sel_idx <= len(history_files):
                     vac_file = history_files[sel_idx - 1]
                     processed_history = load_processed_urls()
-                    process_vacancy(vac_file, "procesadas/vacantes_viejas", config, processed_history)
+                    process_vacancy(vac_file, "processed/archived_vacancies", config, processed_history)
                 else:
-                    print("Opción inválida.")
+                    print("Invalid option.")
             else:
-                print("Opción inválida.")
+                print("Invalid option.")
                 
         elif opc == "3":
-            # Ejecutar CLI interactivo de candidatos
+            # Start interactive CLI browser
             run_cli()
             
         elif opc.lower() == "q":
-            print("\nSaliendo de ReferLooker. ¡Hasta luego!")
+            print("\nExiting ReferLooker. See you soon!")
             break
         else:
-            print("\nOpción no válida. Intente de nuevo.")
-    print("\nProcesamiento terminado.")
+            print("\nInvalid option. Please try again.")
+            
+    print("\nProcessing completed.")
 
 if __name__ == "__main__":
     main()

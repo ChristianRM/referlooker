@@ -18,15 +18,16 @@ ENV/
 cookies.json
 .env
 output/
-procesadas/
+processed/
 *.xlsx
 *.log
 design_document_referidos.html
 Design_Document_Referidos.pdf
 linkedin_profile_context/
 scratch/
-vacantes/*
-!vacantes/.gitkeep
+vacancies/*
+!vacancies/.gitkeep
+
 
 
 
