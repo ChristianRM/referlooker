@@ -9,7 +9,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from query_generator import generate_search_query
 from evaluator import evaluate_candidate
-from main import update_excel_report, regenerate_reports
+from main import update_json_report
+
 
 def run_mock_integration_test():
     """
@@ -77,8 +78,6 @@ def run_mock_integration_test():
     ]
     
     # 4. Process and Evaluate Candidates
-    excel_path = "output/desirable_candidates.xlsx"
-    txt_path = "output/desirable_candidates.txt"
     min_score = config["evaluation"]["min_score"]
     
     # Initialize or load simulated processed history logs
@@ -114,20 +113,25 @@ def run_mock_integration_test():
             "timestamp": pd.Timestamp.now().isoformat()
         }
         
-        if score >= min_score:
-            print(f"[Accepted] Candidate qualifies for the report ({score}% >= {min_score}%)")
-            candidate_record = {
-                "Associated Vacancy": "backend_sr.txt",
-                "Candidate / Headline": f"{profile['name']} | {profile['headline']}",
-                "Score": f"{score}%",
-                "Score Breakdown": f"Tech: {evaluation.get('technical_score', 0)}/40 | Exp: {evaluation.get('experience_score', 0)}/40 | Aux: {evaluation.get('auxiliary_score', 0)}/20",
-                "Evaluation Summary (LLM)": eval_summary,
-                "LinkedIn URL": url,
-                "Status": "Pending"
-            }
-            update_excel_report(candidate_record, excel_path)
-        else:
-            print(f"[Discarded] Candidate score is below minimum threshold.")
+        # Save to JSON database
+        candidate_record = {
+            "vacancy": "backend_sr.txt",
+            "name": profile["name"] or "Unknown",
+            "headline": profile["headline"] or "No headline",
+            "technical_score": int(evaluation.get("technical_score", 0)),
+            "experience_score": int(evaluation.get("experience_score", 0)),
+            "auxiliary_score": int(evaluation.get("auxiliary_score", 0)),
+            "score": int(score),
+            "open_to_work": bool(open_to_work),
+            "evaluation_summary": eval_summary,
+            "linkedin_url": url,
+            "location": profile.get("location") or "Not specified",
+            "about": profile.get("about") or "",
+            "experience": profile.get("experience") or "",
+            "skills": profile.get("skills") or "",
+            "timestamp": pd.Timestamp.now().isoformat()
+        }
+        update_json_report(candidate_record)
             
     # Save history logs
     with open(history_path, "w", encoding="utf-8") as f:
@@ -143,14 +147,9 @@ def run_mock_integration_test():
     except Exception as e:
         print(f"[Warning] Could not archive vacancy file: {e}")
         
-    # Regenerate reports consolidating information
-    regenerate_reports(excel_path, txt_path)
-    
     print("\n" + "=" * 60)
     print("TEST COMPLETED SUCCESSFULLY.")
-    print("Please check the 'output/' directory to validate results:")
-    print(f"- Excel Report: {os.path.abspath(excel_path)}")
-    print(f"- Plain Text Report: {os.path.abspath(txt_path)}")
+    print("Please check the 'output/candidates.json' file to validate the database results.")
     print("=" * 60)
 
 if __name__ == "__main__":

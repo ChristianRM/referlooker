@@ -61,90 +61,7 @@ def save_processed_urls(processed_dict: dict):
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(processed_dict, f, indent=2, ensure_ascii=False)
 
-def update_excel_report(candidate_info: dict, excel_path: str):
-    """Inserts or updates a candidate in the Excel report."""
-    columns = ["Associated Vacancy", "Candidate / Headline", "Score", "Score Breakdown", "Evaluation Summary (LLM)", "LinkedIn URL", "Status"]
-    
-    if os.path.exists(excel_path):
-        try:
-            df = pd.read_excel(excel_path)
-            # Ensure missing columns are added if the file existed previously
-            for col in columns:
-                if col not in df.columns:
-                    df[col] = None
-        except Exception:
-            df = pd.DataFrame(columns=columns)
-    else:
-        df = pd.DataFrame(columns=columns)
-        
-    url = candidate_info.get("LinkedIn URL")
-    if not url:
-        return
-        
-    exists = df["LinkedIn URL"] == url
-    new_row = pd.DataFrame([candidate_info])
-    
-    if exists.any():
-        # Update existing row
-        idx = df[exists].index[0]
-        for col in columns:
-            df.at[idx, col] = candidate_info[col]
-    else:
-        # Append the new row
-        df = pd.concat([df, new_row], ignore_index=True)
-        
-    df.to_excel(excel_path, index=False)
-
-def regenerate_reports(excel_path: str, txt_path: str):
-    """
-    Sorts and regenerates the reports based on the Excel file.
-    """
-    if not os.path.exists(excel_path):
-        return
-        
-    try:
-        df = pd.read_excel(excel_path)
-        if df.empty:
-            return
-            
-        # Create a temporary numeric column for sorting the Score (e.g., "94%" -> 94.0)
-        df["Score_Num"] = df["Score"].astype(str).str.rstrip("%").astype(float, errors="ignore")
-        
-        # Sort by Vacancy (alphabetical) and then by Score_Num (descending)
-        df = df.sort_values(by=["Associated Vacancy", "Score_Num"], ascending=[True, False])
-        df = df.drop(columns=["Score_Num"])
-        
-        # Save sorted Excel file
-        df.to_excel(excel_path, index=False)
-        
-        # Write consolidated report in TXT format
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("============================================================\n")
-            f.write("      CONSOLIDATED REPORT OF DESIRABLE CANDIDATES\n")
-            f.write("============================================================\n")
-            f.write(f"Total Candidates: {len(df)}\n")
-            
-            current_vacancy = None
-            for _, row in df.iterrows():
-                vac = row["Associated Vacancy"]
-                if vac != current_vacancy:
-                    current_vacancy = vac
-                    f.write(f"\n============================================================\n")
-                    f.write(f"VACANCY: {current_vacancy}\n")
-                    f.write(f"============================================================\n")
-                
-                f.write(f"Candidate: {row['Candidate / Headline']}\n")
-                f.write(f"Score: {row['Score']}\n")
-                if 'Score Breakdown' in row and pd.notna(row['Score Breakdown']):
-                    f.write(f"Score Breakdown: {row['Score Breakdown']}\n")
-                f.write(f"LinkedIn: {row['LinkedIn URL']}\n")
-                f.write(f"Status: {row['Status']}\n")
-                f.write(f"Evaluation Summary: {row['Evaluation Summary (LLM)']}\n")
-                f.write(f"------------------------------------------------------------\n")
-                
-        print(f"[Report] Reports successfully updated in 'output/'.")
-    except Exception as e:
-        print(f"[Error] Could not regenerate reports: {e}")
+# Excel and TXT report generation functions have been removed. Candidate information is managed solely via output/candidates.json database.
 
 def update_json_report(candidate_info: dict):
     """
@@ -188,19 +105,6 @@ def update_json_report(candidate_info: dict):
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
-    # If it meets the threshold, update the Excel and TXT reports
-    if score >= 85:
-        excel_record = {
-            "Associated Vacancy": candidate_info.get("vacancy", "Unknown"),
-            "Candidate / Headline": f"{candidate_info.get('name', 'Unknown')} | {candidate_info.get('headline', 'No headline')}",
-            "Score": f"{score}%",
-            "Score Breakdown": f"Tech: {candidate_info.get('technical_score', 0)}/40 | Exp: {candidate_info.get('experience_score', 0)}/40 | Aux: {candidate_info.get('auxiliary_score', 0)}/20",
-            "Evaluation Summary (LLM)": candidate_info.get("evaluation_summary", ""),
-            "LinkedIn URL": url,
-            "Status": "Pending"
-        }
-        update_excel_report(excel_record, "output/desirable_candidates.xlsx")
-        regenerate_reports("output/desirable_candidates.xlsx", "output/desirable_candidates.txt")
 
 def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_history: dict):
     """Processes a single vacancy (query generation, search, scraping, evaluation)."""
