@@ -6,18 +6,36 @@ from playwright.sync_api import sync_playwright
 def get_section_text(page, section_id: str) -> str:
     """
     Busca una sección de la página de LinkedIn basándose en el ID del ancla semántica.
-    Esto permite extraer secciones como 'about', 'experience', 'skills', etc.,
-    siendo altamente resistente a cambios en los nombres de clases CSS de LinkedIn.
+    Si falla, intenta buscar por encabezados de texto comunes (en inglés o español)
+    para ser compatible con múltiples layouts.
     """
-    # XPaths que buscan el elemento con el ID indicado dentro de un contenedor <section>
+    # 1. Intentar por ID (selector clásico de escritorio)
     xpath = f"//section[.//div[@id='{section_id}'] or .//span[@id='{section_id}'] or .//a[@id='{section_id}'] or .//*[@id='{section_id}']]"
     try:
         locator = page.locator(xpath)
         if locator.count() > 0:
-            # Retorna el texto interno estructurado
             return locator.first.inner_text().strip()
-    except Exception as e:
-        print(f"[Depuración] No se pudo extraer la sección '{section_id}': {e}")
+    except Exception:
+        pass
+        
+    # 2. Fallback por texto del encabezado (h2)
+    headings = []
+    if section_id == "about":
+        headings = ["About", "Acerca de", "Extracto"]
+    elif section_id == "experience":
+        headings = ["Experience", "Experiencia"]
+    elif section_id == "skills":
+        headings = ["Skills", "Habilidades", "Aptitudes"]
+        
+    for heading in headings:
+        xpath_h = f"//section[.//h2[contains(text(), '{heading}')] or .//h3[contains(text(), '{heading}')] or .//*[contains(text(), '{heading}')]]"
+        try:
+            locator = page.locator(xpath_h)
+            if locator.count() > 0:
+                return locator.first.inner_text().strip()
+        except Exception:
+            pass
+            
     return ""
 
 def expand_collapsed_sections(page):

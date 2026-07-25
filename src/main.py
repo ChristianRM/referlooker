@@ -11,6 +11,7 @@ from query_generator import generate_search_query, generate_refined_search_query
 from search_engine import search_candidates
 from linkedin_scraper import scrape_linkedin_profile, ensure_linkedin_session
 from evaluator import evaluate_candidate
+from cli import run_cli
 
 class Tee:
     def __init__(self, filename, mode="a"):
@@ -60,6 +61,88 @@ def save_processed_urls(processed_dict: dict):
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(processed_dict, f, indent=2, ensure_ascii=False)
 
+def update_excel_report(candidate_info: dict, excel_path: str):
+    """Inserta o actualiza un candidato en el reporte de Excel."""
+    columns = ["Vacante Asociada", "Candidato / Titular", "Score", "Resumen de Evaluación (LLM)", "URL LinkedIn", "Estado"]
+    
+    if os.path.exists(excel_path):
+        try:
+            df = pd.read_excel(excel_path)
+        except Exception:
+            df = pd.DataFrame(columns=columns)
+    else:
+        df = pd.DataFrame(columns=columns)
+        
+    url = candidate_info.get("URL LinkedIn")
+    if not url:
+        return
+        
+    exists = df["URL LinkedIn"] == url
+    
+    new_row = pd.DataFrame([candidate_info])
+    
+    if exists.any():
+        # Actualizar fila existente
+        idx = df[exists].index[0]
+        for col in columns:
+            df.at[idx, col] = candidate_info[col]
+    else:
+        # Concatenar la nueva fila
+        df = pd.concat([df, new_row], ignore_index=True)
+        
+    df.to_excel(excel_path, index=False)
+
+
+def regenerate_reports(excel_path: str, txt_path: str):
+    """
+    Ordena y regenera los reportes a partir del archivo Excel.
+    """
+    if not os.path.exists(excel_path):
+        return
+        
+    try:
+        df = pd.read_excel(excel_path)
+        if df.empty:
+            return
+            
+        # Crear columna numérica temporal para ordenar el Score (ej: "94%" -> 94)
+        df["Score_Num"] = df["Score"].astype(str).str.rstrip("%").astype(float, errors="ignore")
+        
+        # Ordenar por Vacante (alfabético) y luego por Score_Num (descendente)
+        df = df.sort_values(by=["Vacante Asociada", "Score_Num"], ascending=[True, False])
+        df = df.drop(columns=["Score_Num"])
+        
+        # Guardar archivo Excel ordenado
+        df.to_excel(excel_path, index=False)
+        
+        # Escribir reporte en TXT
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("============================================================\n")
+            f.write("      REPORTE CONSOLIDADO DE CANDIDATOS DESEABLES\n")
+            f.write("============================================================\n")
+            f.write(f"Total Candidatos: {len(df)}\n")
+            
+            current_vacancy = None
+            for _, row in df.iterrows():
+                vac = row["Vacante Asociada"]
+                if vac != current_vacancy:
+                    current_vacancy = vac
+                    f.write(f"\n============================================================\n")
+                    f.write(f"VACANTE: {current_vacancy}\n")
+                    f.write(f"============================================================\n")
+                
+                f.write(f"Candidato: {row['Candidato / Titular']}\n")
+                f.write(f"Score: {row['Score']}\n")
+                f.write(f"LinkedIn: {row['URL LinkedIn']}\n")
+                f.write(f"Estado: {row['Estado']}\n")
+                f.write(f"Resumen de Evaluación: {row['Resumen de Evaluación (LLM)']}\n")
+                f.write(f"------------------------------------------------------------\n")
+                
+        print(f"[Reporte] Reportes actualizados con éxito en 'output/'.")
+    except Exception as e:
+        print(f"[Error] No se pudieron regenerar los reportes: {e}")
+
+
 def update_json_report(candidate_info: dict):
     """
     Agrega o actualiza un candidato en el archivo consolidado de candidatos (output/candidatos.json).
@@ -102,6 +185,206 @@ def update_json_report(candidate_info: dict):
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
+    # Si supera el score mínimo de deseables, actualizar reportes de Excel y TXT
+    if score >= 85:
+        excel_record = {
+            "Vacante Asociada": candidate_info.get("vacante", "Desconocido"),
+            "Candidato / Titular": f"{candidate_info.get('nombre', 'Desconocido')} | {candidate_info.get('titular', 'Sin titular')}",
+            "Score": f"{score}%",
+            "Resumen de Evaluación (LLM)": candidate_info.get("resumen_evaluacion", ""),
+            "URL LinkedIn": url,
+            "Estado": "Pendiente"
+        }
+        update_excel_report(excel_record, "output/candidatos_deseables.xlsx")
+        regenerate_reports("output/candidatos_deseables.xlsx", "output/candidatos_deseables.txt")
+
+
+def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_history: dict):
+    """Procesa una única vacante (generación de query, búsqueda, scraping, evaluación)."""
+    vac_path = os.path.join(vac_folder, vac_file)
+    print(f"\n" + "-" * 50)
+    print(f"Procesando vacante: {vac_file} desde '{vac_folder}'")
+    print("-" * 50)
+    
+    with open(vac_path, "r", encoding="utf-8") as f:
+        vacancy_text = f.read().strip()
+        
+    if not vacancy_text:
+        print(f"[Advertencia] El archivo {vac_file} está vacío. Omitiendo.")
+        return
+        
+    # 1. Generar la consulta X-Ray con el LLM
+    print("Generando consulta X-Ray con Ollama...")
+    analysis = generate_search_query(vacancy_text, config)
+    role = analysis.get("role", "Desconocido")
+    query = analysis.get("search_query", "")
+    target_country = analysis.get("target_country", "Any")
+    
+    print(f"Rol detectado: {role}")
+    print(f"País objetivo de la vacante: {target_country}")
+    print(f"Query generada: {query}")
+    
+    if not query:
+        print("[Error] No se pudo generar una consulta de búsqueda válida. Omitiendo vacante.")
+        return
+        
+    satisfied = False
+    refined_query = query
+    
+    while not satisfied:
+        # Contar cuántos candidatos se han procesado previamente para esta vacante para paginar (start_offset)
+        start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
+        candidate_urls = search_candidates(refined_query, config, start_offset=start_offset)
+        
+        if not candidate_urls:
+            print(f"[Advertencia] No se encontraron perfiles de LinkedIn con la consulta actual.")
+        else:
+            # 3. Asegurar que la sesión de LinkedIn esté iniciada (asistiendo de forma visible si expiró)
+            if any(url not in processed_history for url in candidate_urls):
+                ensure_linkedin_session(config)
+                
+            # 4. Scrapear y evaluar candidatos
+            for url in candidate_urls:
+                # Evitar reprocesar candidatos ya evaluados para esta vacante
+                if url in processed_history:
+                    print(f"[Saltado] Candidato ya procesado anteriormente: {url}")
+                    continue
+                    
+                # Scrapear perfil (pasando target_country para filtrado en Fase 1)
+                profile = scrape_linkedin_profile(url, target_country, config)
+                
+                # Registrar URL en el historial
+                processed_history[url] = {
+                    "vacante": vac_file,
+                    "status": profile["status"],
+                    "name": profile["name"],
+                    "timestamp": pd.Timestamp.now().isoformat()
+                }
+                save_processed_urls(processed_history)
+                
+                # Si se descartó por ubicación en Fase 1
+                if profile["status"] == "location_mismatch":
+                    candidate_record = {
+                        "vacante": vac_file,
+                        "nombre": profile["name"] or "Desconocido",
+                        "titular": profile["headline"] or "Sin titular",
+                        "score": 0,
+                        "open_to_work": False,
+                        "resumen_evaluacion": f"Descartado automáticamente por Ollama: ubicación fuera del país. (Ubicación: '{profile.get('location')}', Vacante requiere: '{target_country}').",
+                        "linkedin_url": url,
+                        "location": profile.get("location") or "No especificada",
+                        "acerca_de": profile.get("about") or "",
+                        "experiencia": profile.get("experience") or "",
+                        "habilidades": profile.get("skills") or "",
+                        "timestamp": pd.Timestamp.now().isoformat()
+                    }
+                    update_json_report(candidate_record)
+                    continue
+                    
+                # Si hubo otro error en el scraper
+                if profile["status"] != "success":
+                    print(f"[Error Scraper] No se pudo procesar {url}: {profile['error_message']}")
+                    candidate_record = {
+                        "vacante": vac_file,
+                        "nombre": profile["name"] or "Desconocido",
+                        "titular": profile["headline"] or "Sin titular",
+                        "score": 0,
+                        "open_to_work": False,
+                        "resumen_evaluacion": f"Error al scrapear perfil: {profile['error_message']}",
+                        "linkedin_url": url,
+                        "location": profile.get("location") or "No especificada",
+                        "acerca_de": profile.get("about") or "",
+                        "experiencia": profile.get("experience") or "",
+                        "habilidades": profile.get("skills") or "",
+                        "timestamp": pd.Timestamp.now().isoformat()
+                    }
+                    update_json_report(candidate_record)
+                    continue
+                    
+                # Evaluar match completo con Ollama
+                print(f"Evaluando perfil de '{profile['name']}' contra la vacante...")
+                evaluation = evaluate_candidate(profile, vacancy_text, config)
+                score = evaluation["match_score"]
+                open_to_work = evaluation["open_to_work"]
+                eval_resumen = evaluation["resumen_evaluacion"]
+                
+                print(f"--> Puntuación Match: {score}% | OpenToWork: {open_to_work}")
+                
+                # Registrar record en JSON consolidado
+                candidate_record = {
+                    "vacante": vac_file,
+                    "nombre": profile["name"] or "Desconocido",
+                    "titular": profile["headline"] or "Sin titular",
+                    "score": int(score),
+                    "open_to_work": bool(open_to_work),
+                    "resumen_evaluacion": eval_resumen,
+                    "linkedin_url": url,
+                    "location": profile.get("location") or "No especificada",
+                    "acerca_de": profile.get("about") or "",
+                    "experiencia": profile.get("experience") or "",
+                    "habilidades": profile.get("skills") or "",
+                    "timestamp": pd.Timestamp.now().isoformat()
+                }
+                update_json_report(candidate_record)
+
+        # Mostrar resumen interactivo de candidatos para esta vacante hasta ahora
+        print(f"\n" + "=" * 60)
+        print(f"   RESUMEN DE CANDIDATOS PARA LA VACANTE: {vac_file}")
+        print(f"   (País requerido: {target_country})")
+        print(f"=" * 60)
+        
+        vacancy_candidates = []
+        if os.path.exists("output/candidatos.json"):
+            try:
+                with open("output/candidatos.json", "r", encoding="utf-8") as f:
+                    report = json.load(f)
+                    all_cands = report.get("candidatos_deseables", []) + report.get("candidatos_no_deseables", [])
+                    vacancy_candidates = [c for c in all_cands if c.get("vacante") == vac_file]
+            except Exception:
+                pass
+        
+        if vacancy_candidates:
+            # Ordenar por score descendente
+            vacancy_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+            for c in vacancy_candidates:
+                print(f"- {c.get('nombre')} | Score: {c.get('score')}% | Ubicación: {c.get('location')} | URL: {c.get('linkedin_url')}")
+        else:
+            print("No hay candidatos procesados para esta vacante aún.")
+        print("=" * 60)
+        
+        satisfy_input = input(f"\n¿Estás satisfecho con los resultados obtenidos para la vacante '{vac_file}'? (S/N) [S]: ").strip().lower()
+        if satisfy_input in ("", "s", "si", "yes"):
+            satisfied = True
+            # Mover al histórico si viene de la carpeta vacantes activas
+            if vac_folder == "vacantes":
+                dest_path = os.path.join("procesadas/vacantes_viejas", vac_file)
+                try:
+                    if os.path.exists(dest_path):
+                        os.remove(dest_path)
+                    shutil.move(vac_path, dest_path)
+                    print(f"Archivo de vacante movido a históricos: {dest_path}")
+                except Exception as e:
+                    print(f"[Error] No se pudo mover la vacante a históricos: {e}")
+            else:
+                print(f"[Info] Manteniendo la vacante archivada en su histórico: {vac_path}")
+        else:
+            refine_input = input("¿Deseas que Ollama auto-refine la consulta de búsqueda para encontrar más candidatos? (S/N) [S]: ").strip().lower()
+            if refine_input in ("", "s", "si", "yes"):
+                print("Pidiendo a Ollama que auto-refine la consulta de búsqueda...")
+                new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
+                if new_refined:
+                    print(f"\n--> Ollama generó la siguiente consulta refinada:\n{new_refined}")
+                    use_refined = input("¿Deseas ejecutar la búsqueda con esta consulta refinada? (S/N) [S]: ").strip().lower()
+                    if use_refined in ("", "s", "si", "yes"):
+                        refined_query = new_refined
+                    else:
+                        print("[Info] No se aplicó el refinamiento. Reintentando con consulta anterior.")
+                else:
+                    print("[Advertencia] Ollama no pudo generar una consulta refinada. Reintentando con consulta anterior.")
+            else:
+                print(f"[Info] Manteniendo la vacante '{vac_file}' en '{vac_folder}' para futuras corridas.")
+                break
+
 
 def main():
     setup_directories()
@@ -112,203 +395,65 @@ def main():
     
     config = load_config()
     
-    # Obtener archivos de vacantes
-    vacancy_files = [f for f in os.listdir("vacantes") if f.endswith(".txt")]
-    
-    if not vacancy_files:
-        print("No se encontraron archivos de vacantes (.txt) en la carpeta 'vacantes/'.")
-        print("Coloca descripciones de puestos allí y vuelve a ejecutar.")
-        return
+    while True:
+        # Imprimir menú en stdout normal (para que no salga repetido por Tee o si deseamos visualización en pantalla)
+        print("\n" + "=" * 60)
+        print("                 REFERLOOKER - MENÚ PRINCIPAL")
+        print("=" * 60)
+        print("1. Procesar vacantes abiertas (carpeta 'vacantes/')")
+        print("2. Reanudar búsqueda de vacantes procesadas (carpeta 'procesadas/vacantes_viejas/')")
+        print("3. Navegar y filtrar candidatos (CLI interactivo)")
+        print("q. Salir")
+        print("=" * 60)
         
-    processed_history = load_processed_urls()
-    excel_path = "output/candidatos_deseables.xlsx"
-    txt_path = "output/candidatos_deseables.txt"
-    min_score = config.get("evaluation", {}).get("min_score", 80)
-    
-    print(f"Iniciando procesamiento de {len(vacancy_files)} vacante(s)...")
-    
-    for vac_file in vacancy_files:
-        vac_path = os.path.join("vacantes", vac_file)
-        print(f"\n" + "-" * 50)
-        print(f"Procesando vacante: {vac_file}")
-        print("-" * 50)
+        opc = input("Seleccione una opción: ").strip()
         
-        with open(vac_path, "r", encoding="utf-8") as f:
-            vacancy_text = f.read().strip()
+        if opc == "1":
+            vacancy_files = [f for f in os.listdir("vacantes") if f.endswith(".txt")]
+            if not vacancy_files:
+                print("\nNo se encontraron archivos de vacantes (.txt) en la carpeta 'vacantes/'.")
+                print("Coloca descripciones de puestos allí y vuelve a ejecutar.")
+                continue
+                
+            print(f"\nIniciando procesamiento de {len(vacancy_files)} vacante(s) abierta(s)...")
+            for vac_file in vacancy_files:
+                processed_history = load_processed_urls()
+                process_vacancy(vac_file, "vacantes", config, processed_history)
+                
+        elif opc == "2":
+            history_files = [f for f in os.listdir("procesadas/vacantes_viejas") if f.endswith(".txt")]
+            if not history_files:
+                print("\nNo se encontraron vacantes procesadas en 'procesadas/vacantes_viejas/'.")
+                continue
+                
+            print("\nSeleccione la vacante que desea reanudar:")
+            for idx, file in enumerate(history_files, 1):
+                print(f"{idx}. {file}")
+            print("q. [Volver al menú principal]")
             
-        if not vacancy_text:
-            print(f"[Advertencia] El archivo {vac_file} está vacío. Omitiendo.")
-            continue
-            
-        # 1. Generar la consulta X-Ray con el LLM
-        print("Generando consulta X-Ray con Ollama...")
-        analysis = generate_search_query(vacancy_text, config)
-        role = analysis.get("role", "Desconocido")
-        query = analysis.get("search_query", "")
-        target_country = analysis.get("target_country", "Any")
-        
-        print(f"Rol detectado: {role}")
-        print(f"País objetivo de la vacante: {target_country}")
-        print(f"Query generada: {query}")
-        
-        if not query:
-            print("[Error] No se pudo generar una consulta de búsqueda válida. Omitiendo vacante.")
-            continue
-            
-        satisfied = False
-        refined_query = query
-        
-        while not satisfied:
-            # Contar cuántos candidatos se han procesado previamente para esta vacante para paginar (start_offset)
-            start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
-            candidate_urls = search_candidates(refined_query, config, start_offset=start_offset)
-            
-            if not candidate_urls:
-                print(f"[Advertencia] No se encontraron perfiles de LinkedIn con la consulta actual.")
-            else:
-                # 3. Asegurar que la sesión de LinkedIn esté iniciada (asistiendo de forma visible si expiró)
-                if any(url not in processed_history for url in candidate_urls):
-                    ensure_linkedin_session(config)
-                    
-                # 4. Scrapear y evaluar candidatos
-                for url in candidate_urls:
-                    # Evitar reprocesar candidatos ya evaluados para esta vacante
-                    if url in processed_history:
-                        print(f"[Saltado] Candidato ya procesado anteriormente: {url}")
-                        continue
-                        
-                    # Scrapear perfil (pasando target_country para filtrado en Fase 1)
-                    profile = scrape_linkedin_profile(url, target_country, config)
-                    
-                    # Registrar URL en el historial
-                    processed_history[url] = {
-                        "vacante": vac_file,
-                        "status": profile["status"],
-                        "name": profile["name"],
-                        "timestamp": pd.Timestamp.now().isoformat()
-                    }
-                    save_processed_urls(processed_history)
-                    
-                    # Si se descartó por ubicación en Fase 1
-                    if profile["status"] == "location_mismatch":
-                        candidate_record = {
-                            "vacante": vac_file,
-                            "nombre": profile["name"] or "Desconocido",
-                            "titular": profile["headline"] or "Sin titular",
-                            "score": 0,
-                            "open_to_work": False,
-                            "resumen_evaluacion": f"Descartado automáticamente por Ollama: ubicación fuera del país. (Ubicación: '{profile.get('location')}', Vacante requiere: '{target_country}').",
-                            "linkedin_url": url,
-                            "location": profile.get("location") or "No especificada",
-                            "acerca_de": profile.get("about") or "",
-                            "experiencia": profile.get("experience") or "",
-                            "habilidades": profile.get("skills") or "",
-                            "timestamp": pd.Timestamp.now().isoformat()
-                        }
-                        update_json_report(candidate_record)
-                        continue
-                        
-                    # Si hubo otro error en el scraper
-                    if profile["status"] != "success":
-                        print(f"[Error Scraper] No se pudo procesar {url}: {profile['error_message']}")
-                        candidate_record = {
-                            "vacante": vac_file,
-                            "nombre": profile["name"] or "Desconocido",
-                            "titular": profile["headline"] or "Sin titular",
-                            "score": 0,
-                            "open_to_work": False,
-                            "resumen_evaluacion": f"Error al scrapear perfil: {profile['error_message']}",
-                            "linkedin_url": url,
-                            "location": profile.get("location") or "No especificada",
-                            "acerca_de": profile.get("about") or "",
-                            "experiencia": profile.get("experience") or "",
-                            "habilidades": profile.get("skills") or "",
-                            "timestamp": pd.Timestamp.now().isoformat()
-                        }
-                        update_json_report(candidate_record)
-                        continue
-                        
-                    # Evaluar match completo con Ollama
-                    print(f"Evaluando perfil de '{profile['name']}' contra la vacante...")
-                    evaluation = evaluate_candidate(profile, vacancy_text, config)
-                    score = evaluation["match_score"]
-                    open_to_work = evaluation["open_to_work"]
-                    eval_resumen = evaluation["resumen_evaluacion"]
-                    
-                    print(f"--> Puntuación Match: {score}% | OpenToWork: {open_to_work}")
-                    
-                    # Registrar record en JSON consolidado
-                    candidate_record = {
-                        "vacante": vac_file,
-                        "nombre": profile["name"] or "Desconocido",
-                        "titular": profile["headline"] or "Sin titular",
-                        "score": int(score),
-                        "open_to_work": bool(open_to_work),
-                        "resumen_evaluacion": eval_resumen,
-                        "linkedin_url": url,
-                        "location": profile.get("location") or "No especificada",
-                        "acerca_de": profile.get("about") or "",
-                        "experiencia": profile.get("experience") or "",
-                        "habilidades": profile.get("skills") or "",
-                        "timestamp": pd.Timestamp.now().isoformat()
-                    }
-                    update_json_report(candidate_record)
-
-            # Mostrar resumen interactivo de candidatos para esta vacante hasta ahora
-            print(f"\n" + "=" * 60)
-            print(f"   RESUMEN DE CANDIDATOS PARA LA VACANTE: {vac_file}")
-            print(f"   (País requerido: {target_country})")
-            print(f"=" * 60)
-            
-            vacancy_candidates = []
-            if os.path.exists("output/candidatos.json"):
-                try:
-                    with open("output/candidatos.json", "r", encoding="utf-8") as f:
-                        report = json.load(f)
-                        all_cands = report.get("candidatos_deseables", []) + report.get("candidatos_no_deseables", [])
-                        vacancy_candidates = [c for c in all_cands if c.get("vacante") == vac_file]
-                except Exception:
-                    pass
-            
-            if vacancy_candidates:
-                # Ordenar por score descendente
-                vacancy_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
-                for c in vacancy_candidates:
-                    print(f"- {c.get('nombre')} | Score: {c.get('score')}% | Ubicación: {c.get('location')} | URL: {c.get('linkedin_url')}")
-            else:
-                print("No hay candidatos procesados para esta vacante aún.")
-            print("=" * 60)
-            
-            satisfy_input = input(f"\n¿Estás satisfecho con los resultados obtenidos para la vacante '{vac_file}'? (S/N) [S]: ").strip().lower()
-            if satisfy_input in ("", "s", "si", "yes"):
-                satisfied = True
-                # Mover al histórico
-                dest_path = os.path.join("procesadas/vacantes_viejas", vac_file)
-                try:
-                    if os.path.exists(dest_path):
-                        os.remove(dest_path)
-                    shutil.move(vac_path, dest_path)
-                    print(f"Archivo de vacante movido a históricos: {dest_path}")
-                except Exception as e:
-                    print(f"[Error] No se pudo mover la vacante a históricos: {e}")
-            else:
-                refine_input = input("¿Deseas que Ollama auto-refine la consulta de búsqueda para encontrar más candidatos? (S/N) [S]: ").strip().lower()
-                if refine_input in ("", "s", "si", "yes"):
-                    print("Pidiendo a Ollama que auto-refine la consulta de búsqueda...")
-                    new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
-                    if new_refined:
-                        print(f"\n--> Ollama generó la siguiente consulta refinada:\n{new_refined}")
-                        use_refined = input("¿Deseas ejecutar la búsqueda con esta consulta refinada? (S/N) [S]: ").strip().lower()
-                        if use_refined in ("", "s", "si", "yes"):
-                            refined_query = new_refined
-                        else:
-                            print("[Info] No se aplicó el refinamiento. Reintentando con consulta anterior.")
-                    else:
-                        print("[Advertencia] Ollama no pudo generar una consulta refinada. Reintentando con consulta anterior.")
+            sel = input("\nOpción: ").strip()
+            if sel.lower() == 'q':
+                continue
+            elif sel.isdigit():
+                sel_idx = int(sel)
+                if 1 <= sel_idx <= len(history_files):
+                    vac_file = history_files[sel_idx - 1]
+                    processed_history = load_processed_urls()
+                    process_vacancy(vac_file, "procesadas/vacantes_viejas", config, processed_history)
                 else:
-                    print(f"[Info] Manteniendo la vacante '{vac_file}' en 'vacantes/' para futuras corridas.")
-                    break
+                    print("Opción inválida.")
+            else:
+                print("Opción inválida.")
+                
+        elif opc == "3":
+            # Ejecutar CLI interactivo de candidatos
+            run_cli()
             
+        elif opc.lower() == "q":
+            print("\nSaliendo de ReferLooker. ¡Hasta luego!")
+            break
+        else:
+            print("\nOpción no válida. Intente de nuevo.")
     print("\nProcesamiento terminado.")
 
 if __name__ == "__main__":

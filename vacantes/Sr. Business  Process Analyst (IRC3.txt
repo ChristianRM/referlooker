@@ -1,0 +1,39 @@
+Sr. Business / Process Analyst (IRC300773)
+Mexico, Mexico City
+Job Description
+
+
+● Strong facilitation and ownership skills
+● Strong experience in Business Analysis techniques and practices
+● Strong skills with Requirements identifying and documenting
+● Knowledge of Agile methodologies and Scrum
+● Experience with Atlassian products (Jira, Confluence)
+● Knowledge of software development lifecycle and software development methodologies
+● Knowledge of Requirements Management tools
+● Ability to perform GAP, root cause analysis
+● Experience in the finance software domain (nice to have)
+● Experience in development of AI features (nice to have)
+● Fluent English (comprehensive written and verbal communication)rate description.
+
+Job Responsibilities
+
+Analyze and evaluate complex business processes and systems to identify inefficiencies and opportunities for enhancement.
+Define comprehensive business requirements, functional specifications, and user stories in collaboration with cross-functional teams.
+Facilitate workshops and conduct interviews with key stakeholders to elicit, document, and validate business needs.
+Translate high-level business requirements into detailed technical specifications, ensuring alignment with architectural guidelines.
+Contribute significantly to the design and architecture of new solutions or enhancements, focusing on process optimization and scalability.
+Develop and maintain process documentation, including current state and future state process flows, use cases, and data models.
+Provide expert guidance and mentorship to junior business analysts, fostering their professional growth and technical understanding.
+Collaborate closely with development, QA, and project management teams throughout the software development lifecycle.
+Support the creation of test plans and scenarios, and actively participate in user acceptance testing (UAT) to ensure solution quality.
+Drive the adoption of best practices in business analysis and process management across the organization.
+Proactively identify and assess potential risks related to process changes and system implementations, proposing effective mitigation strategies.
+Lead small to medium-scale process improvement initiatives, ensuring successful delivery and measurable business impact.
+Ensure that all proposed solutions adhere to enterprise standards and regulatory compliance requirements.
+Department/Project Description
+
+Possessing 5-8 years of progressive experience in business analysis and process optimization within an enterprise-level technology environment, demonstrating a strong track record of successful project contributions.
+This position offers a fully remote work model, providing the flexibility to collaborate effectively with global teams from a designated home office environment.
+Required Skills:
+
+Demonstrated capability to apply foundational Product Ownership and Roadmapping concepts effectively within complex project environments, contributing to strategic planning and execution.
