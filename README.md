@@ -2,7 +2,7 @@
 
 ReferLooker is an automated, unattended recruitment and candidate sourcing system for LinkedIn. It works in the background by processing vacancy descriptions in plain text (`.txt`), searching for active LinkedIn candidates (*Open to Work*) using Google *X-Ray* search techniques, and evaluating candidate profiles against job requirements using a local Large Language Model (LLM) via **Ollama** (leveraging local GPU acceleration, e.g., RTX 5070, for fast inference).
 
-Top matching candidates are consolidated into easy-to-read reports (Excel and Plain Text) so recruiters can immediately connect with them on LinkedIn and submit them to their company's referral program.
+Candidates are processed and stored directly in a structured JSON database, ready to be navigated and filtered using the interactive Candidate Browser CLI. This allows recruiters to immediately review candidates, connect with them on LinkedIn, and submit them to their company's referral program.
 
 ---
 
@@ -20,9 +20,9 @@ graph TD
     E -->|Location mismatch| G[Auto-Discard - Score 0%]
     F -->|Profile sections extracted| H(Local Ollama: Candidate Evaluation)
     H -->|Analyze skills, experience, and OpenToWork| I{Score >= 85%}
-    I -->|Yes| J[desirable_candidates.xlsx / .txt / .json]
+    I -->|Yes| J[candidates.json Database]
     I -->|No| K[undesirable_candidates in candidates.json]
-    J --> L[Terminal / Interactive CLI: Filter and View details]
+    J --> L[Interactive CLI Browser: Filter & Navigate]
 ```
 
 ### Folder Structure
@@ -37,10 +37,8 @@ graph TD
     *   [`save_cookies.py`](file:///d:/Documents/Automations/ReferLooker/src/save_cookies.py): Utility script to capture and persist LinkedIn session cookies.
 *   **`vacancies/`**: Input folder. Place job description `.txt` files here.
 *   **`processed/archived_vacancies/`**: History directory. Vacancy files are moved here once fully processed.
-*   **`output/`**: Output directory containing generated reports:
-    *   `desirable_candidates.xlsx`: Primary spreadsheet report containing top candidates sorted by score.
-    *   `desirable_candidates.txt`: Consolidated plain text version of desirable candidates.
-    *   `candidates.json`: Structured database containing details of all candidates evaluated (desirable and undesirable).
+*   **`output/`**: Output directory containing candidate database and logs:
+    *   `candidates.json`: Structured database containing details of all candidates evaluated (desirable and undesirable). This is the single source of truth for all candidate records.
     *   `processed_urls.json`: History log of scraped profile URLs to avoid double-processing and API waste.
     *   `referral_bot.log`: Log file mapping all system terminal events.
 
@@ -146,7 +144,7 @@ q. Quit
     *   Scrape each profile using Playwright and your cookies.
     *   **Immediate Location Filter**: Check the candidate's country. If it does not match the vacancy requirements, the candidate is discarded immediately (`Score: 0%`) to save resources.
     *   **LLM Screening**: If location matches, extract About, Experience, and Skills, and ask Ollama to generate a detailed match score, OpenToWork verification, and strengths/gaps summary in English.
-    *   **Report Storage**: Candidates scoring **>= 85%** are appended to `output/desirable_candidates.xlsx` and `desirable_candidates.txt`. All candidates are cataloged in `output/candidates.json`.
+    *   **Database Storage**: All candidates are saved directly into the JSON candidate database: `output/candidates.json`.
 4.  Once a vacancy run finishes, the script lists candidates and prompts:
     `Are you satisfied with the results obtained for vacancy '[title]'? (Y/N) [Y]:`
     *   **Yes (Y)**: Moves the vacancy description file to `processed/archived_vacancies/` to archive it.
