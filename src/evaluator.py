@@ -19,8 +19,45 @@ def clean_json_response(text: str) -> str:
 def evaluate_candidate(profile_data: dict, vacancy_text: str, config: dict) -> dict:
     """
     Analyzes the LinkedIn profile and the job description using Ollama
-    to calculate a match score, check open-to-work status, and write a summary.
+    to calculate structured sub-scores and enforce strict Open to Work filtering.
     """
+    # 1. Python-based quick check for active search signals
+    text_to_check = " ".join([
+        profile_data.get("headline", "") or "",
+        profile_data.get("about", "") or "",
+        profile_data.get("experience", "") or "",
+        profile_data.get("raw_text", "") or ""
+    ]).lower()
+    
+    signals = [
+        "open to work",
+        "open to opportunities",
+        "looking for",
+        "seeking",
+        "disponible",
+        "disponibilidad",
+        "búsqueda activa",
+        "busqueda activa",
+        "nuevos retos",
+        "opentowork",
+        "new challenges",
+        "new opportunities",
+        "open to new"
+    ]
+    
+    has_active_signal = any(sig in text_to_check for sig in signals)
+    
+    if not has_active_signal:
+        return {
+            "technical_score": 0,
+            "experience_score": 0,
+            "auxiliary_score": 0,
+            "match_score": 0,
+            "open_to_work": False,
+            "evaluation_summary": "Candidate discarded: No active job search indicators (Open to Work, looking for, seeking, etc.) found in the profile headline, about, or experience text."
+        }
+        
+    # 2. Proceed to LLM evaluation if a signal is found
     model_name = config.get("ollama", {}).get("model", "llama3.1:8b")
     ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
     
@@ -34,7 +71,6 @@ Name: {profile_data.get('name')}
 Headline: {profile_data.get('headline')}
 """
     
-    # If structured sections are extracted, prioritize them; otherwise, use raw body text
     if profile_data.get('about') or profile_data.get('experience'):
         profile_summary += f"""
 [About / Summary]
@@ -68,16 +104,29 @@ Candidate Profile (Extracted from LinkedIn):
 
 You must strictly return a valid JSON object (and NOTHING else) in the following exact format:
 {{
-  "match_score": 85,
-  "open_to_work": true,
-  "evaluation_summary": "A brief and descriptive paragraph (2-3 sentences) in English about the candidate's strengths for this position, whether they meet the required experience and technologies, and any important gaps detected."
+  "open_to_work": [true or false],
+  "technical_score": [integer, 0-40],
+  "experience_score": [integer, 0-40],
+  "auxiliary_score": [integer, 0-20],
+  "match_score": [integer, 0-100],
+  "evaluation_summary": "[2-3 sentences evaluation summary in English]"
 }}
 
-Evaluation Rules:
-1. "match_score" must be an integer from 0 to 100. Be objective. If they do not meet essential technologies or the required experience level, lower the score accordingly.
-2. "open_to_work" must be a boolean (true/false) indicating if there is evidence that the candidate is actively seeking opportunities (mention of 'open to work', 'seeking roles', 'open to opportunities', 'disponible', 'looking for', etc. in their headline or profile sections).
-3. "evaluation_summary" must be written in English.
-4. GEOGRAPHIC LOCATION FILTER (COUNTRY): Check if the job description specifies a mandatory work country or region (e.g., Mexico or United States). If so, identify the candidate's country in their LinkedIn profile. If the candidate is physically in a different country than required by the vacancy, you must strictly score their "match_score" as 0, and write in the "evaluation_summary" the justification indicating they were discarded due to location mismatch (e.g., job requires Mexico but candidate is in India).
+Evaluation Constraints & Rules:
+1. **Open to Work Verification**:
+   Verify if the candidate is actively looking for work by finding explicit indicators (such as 'open to work', 'looking for', 'seeking', 'open to opportunities', 'disponible', 'disponibilidad', 'new challenges', etc.) in their headline, about, or experience sections.
+   * If there are NO such explicit active search phrases in the profile, you MUST set "open_to_work" to false.
+   * If "open_to_work" is false, you MUST set "technical_score", "experience_score", "auxiliary_score", and "match_score" strictly to 0, and state in the "evaluation_summary" that the candidate is discarded because they are not looking for new opportunities.
+   * If they are actively searching, proceed to grade them using the rubric below.
+
+2. **Scoring Rubric (Only for active candidates)**:
+   * **technical_score** (0 to 40 points): Match for core programming languages, libraries, and frameworks specified in the job description.
+   * **experience_score** (0 to 40 points): Match for seniority level, leadership responsibilities, and overall years of experience (YOE) required.
+   * **auxiliary_score** (0 to 20 points): Match for databases, cloud platforms, containerization, DevOps tools, and auxiliary requirements.
+   * **match_score** (0 to 100 points): MUST equal exactly the sum of `technical_score + experience_score + auxiliary_score`.
+
+3. **Geographic Location Check**:
+   If the job description specifies a mandatory work country (e.g., Mexico or United States), verify if the candidate lives there. If they reside in a different country, set the "match_score" (and all sub-scores) strictly to 0, and justify the discard in the "evaluation_summary" (e.g., candidate is based in India but job requires Mexico).
 
 Respond ONLY with the JSON object.
 """
@@ -95,13 +144,16 @@ Respond ONLY with the JSON object.
         data = json.loads(cleaned_text)
         
         return {
+            "technical_score": int(data.get("technical_score", 0)),
+            "experience_score": int(data.get("experience_score", 0)),
+            "auxiliary_score": int(data.get("auxiliary_score", 0)),
             "match_score": int(data.get("match_score", 0)),
             "open_to_work": bool(data.get("open_to_work", False)),
             "evaluation_summary": data.get("evaluation_summary", "Evaluation completed successfully.")
         }
     except Exception as e:
         print(f"[Warning] Error evaluating candidate with Ollama: {e}")
-        # Attempt rescue if JSON is wrapped in free text
+        # Attempt rescue
         try:
             start_idx = response_text.find("{")
             end_idx = response_text.rfind("}")
@@ -109,6 +161,9 @@ Respond ONLY with the JSON object.
                 json_str = response_text[start_idx:end_idx+1]
                 data = json.loads(json_str)
                 return {
+                    "technical_score": int(data.get("technical_score", 0)),
+                    "experience_score": int(data.get("experience_score", 0)),
+                    "auxiliary_score": int(data.get("auxiliary_score", 0)),
                     "match_score": int(data.get("match_score", 0)),
                     "open_to_work": bool(data.get("open_to_work", False)),
                     "evaluation_summary": data.get("evaluation_summary", "Evaluation recovered from response text.")
@@ -117,6 +172,9 @@ Respond ONLY with the JSON object.
             pass
             
         return {
+            "technical_score": 0,
+            "experience_score": 0,
+            "auxiliary_score": 0,
             "match_score": 0,
             "open_to_work": False,
             "evaluation_summary": f"Error processing evaluation with the model: {e}"

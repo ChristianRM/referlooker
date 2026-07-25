@@ -112,6 +112,10 @@ def view_candidate_detail(candidate):
     print(f"{BOLD}LinkedIn URL:{RESET}       {candidate.get('linkedin_url')}")
     print(f"{BOLD}Location:{RESET}           {candidate.get('location')}")
     print(f"{BOLD}Match Score:{RESET}        {score_color}{score}%{RESET}")
+    if score > 0 or candidate.get("open_to_work"):
+        print(f"  ├─ Technical Fit:   {candidate.get('technical_score', 0)}/40")
+        print(f"  ├─ Experience Fit:  {candidate.get('experience_score', 0)}/40")
+        print(f"  └─ Auxiliary/Cloud: {candidate.get('auxiliary_score', 0)}/20")
     print(f"{BOLD}Open to Work:{RESET}       {open_to_work}")
     print(f"{BOLD}Headline:{RESET}           {candidate.get('headline')}")
     print(f"{BOLD}Registration Date:{RESET}  {candidate.get('timestamp', 'N/A')}")

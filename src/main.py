@@ -63,11 +63,15 @@ def save_processed_urls(processed_dict: dict):
 
 def update_excel_report(candidate_info: dict, excel_path: str):
     """Inserts or updates a candidate in the Excel report."""
-    columns = ["Associated Vacancy", "Candidate / Headline", "Score", "Evaluation Summary (LLM)", "LinkedIn URL", "Status"]
+    columns = ["Associated Vacancy", "Candidate / Headline", "Score", "Score Breakdown", "Evaluation Summary (LLM)", "LinkedIn URL", "Status"]
     
     if os.path.exists(excel_path):
         try:
             df = pd.read_excel(excel_path)
+            # Ensure missing columns are added if the file existed previously
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = None
         except Exception:
             df = pd.DataFrame(columns=columns)
     else:
@@ -131,6 +135,8 @@ def regenerate_reports(excel_path: str, txt_path: str):
                 
                 f.write(f"Candidate: {row['Candidate / Headline']}\n")
                 f.write(f"Score: {row['Score']}\n")
+                if 'Score Breakdown' in row and pd.notna(row['Score Breakdown']):
+                    f.write(f"Score Breakdown: {row['Score Breakdown']}\n")
                 f.write(f"LinkedIn: {row['LinkedIn URL']}\n")
                 f.write(f"Status: {row['Status']}\n")
                 f.write(f"Evaluation Summary: {row['Evaluation Summary (LLM)']}\n")
@@ -188,6 +194,7 @@ def update_json_report(candidate_info: dict):
             "Associated Vacancy": candidate_info.get("vacancy", "Unknown"),
             "Candidate / Headline": f"{candidate_info.get('name', 'Unknown')} | {candidate_info.get('headline', 'No headline')}",
             "Score": f"{score}%",
+            "Score Breakdown": f"Tech: {candidate_info.get('technical_score', 0)}/40 | Exp: {candidate_info.get('experience_score', 0)}/40 | Aux: {candidate_info.get('auxiliary_score', 0)}/20",
             "Evaluation Summary (LLM)": candidate_info.get("evaluation_summary", ""),
             "LinkedIn URL": url,
             "Status": "Pending"
@@ -263,6 +270,9 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                         "vacancy": vac_file,
                         "name": profile["name"] or "Unknown",
                         "headline": profile["headline"] or "No headline",
+                        "technical_score": 0,
+                        "experience_score": 0,
+                        "auxiliary_score": 0,
                         "score": 0,
                         "open_to_work": False,
                         "evaluation_summary": f"Automatically discarded: location mismatch. (Candidate location: '{profile.get('location')}', Job requires: '{target_country}').",
@@ -283,6 +293,9 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                         "vacancy": vac_file,
                         "name": profile["name"] or "Unknown",
                         "headline": profile["headline"] or "No headline",
+                        "technical_score": 0,
+                        "experience_score": 0,
+                        "auxiliary_score": 0,
                         "score": 0,
                         "open_to_work": False,
                         "evaluation_summary": f"Scraping error: {profile['error_message']}",
@@ -310,6 +323,9 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     "vacancy": vac_file,
                     "name": profile["name"] or "Unknown",
                     "headline": profile["headline"] or "No headline",
+                    "technical_score": int(evaluation.get("technical_score", 0)),
+                    "experience_score": int(evaluation.get("experience_score", 0)),
+                    "auxiliary_score": int(evaluation.get("auxiliary_score", 0)),
                     "score": int(score),
                     "open_to_work": bool(open_to_work),
                     "evaluation_summary": eval_summary,

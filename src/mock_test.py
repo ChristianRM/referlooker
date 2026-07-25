@@ -120,6 +120,7 @@ def run_mock_integration_test():
                 "Associated Vacancy": "backend_sr.txt",
                 "Candidate / Headline": f"{profile['name']} | {profile['headline']}",
                 "Score": f"{score}%",
+                "Score Breakdown": f"Tech: {evaluation.get('technical_score', 0)}/40 | Exp: {evaluation.get('experience_score', 0)}/40 | Aux: {evaluation.get('auxiliary_score', 0)}/20",
                 "Evaluation Summary (LLM)": eval_summary,
                 "LinkedIn URL": url,
                 "Status": "Pending"
