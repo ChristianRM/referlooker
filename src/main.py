@@ -106,11 +106,11 @@ def update_json_report(candidate_info: dict):
         json.dump(report, f, indent=2, ensure_ascii=False)
 
 
-def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_history: dict):
+def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_history: dict, min_target: int):
     """Processes a single vacancy (query generation, search, scraping, evaluation)."""
     vac_path = os.path.join(vac_folder, vac_file)
     print(f"\n" + "-" * 50)
-    print(f"Processing vacancy: {vac_file} from '{vac_folder}'")
+    print(f"Processing vacancy: {vac_file} from '{vac_folder}' (Target: {min_target} evaluated candidates)")
     print("-" * 50)
     
     with open(vac_path, "r", encoding="utf-8") as f:
@@ -137,102 +137,68 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
         
     satisfied = False
     refined_query = query
+    evaluations_count = 0
+    
+    # Calculate starting offset based on historical records for this vacancy
+    start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
+    current_offset = start_offset
     
     while not satisfied:
-        # Determine current search offset based on previously processed candidates for this vacancy
-        start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
-        candidate_urls = search_candidates(refined_query, config, start_offset=start_offset)
+        print(f"\n[Search] Executing query search starting at offset {current_offset}...")
+        candidate_urls = search_candidates(refined_query, config, start_offset=current_offset)
         
         if not candidate_urls:
-            print(f"[Warning] No LinkedIn profiles found with the current query.")
+            print(f"[Warning] No candidates returned by the search engine.")
+            # If target not reached, auto-refine
+            if evaluations_count < min_target:
+                print(f"[Info] Target not reached ({evaluations_count}/{min_target}). Auto-refining search query...")
+                new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
+                if new_refined and new_refined != refined_query:
+                    print(f"\n--> Auto-refined search query: {new_refined}")
+                    refined_query = new_refined
+                    continue
+                else:
+                    print("[Warning] Could not auto-refine query further. Ending search run.")
+                    break
+            else:
+                break
         else:
-            # Verify that the LinkedIn session is active (assisting visibly if expired)
-            if any(url not in processed_history for url in candidate_urls):
-                ensure_linkedin_session(config)
+            current_offset += len(candidate_urls)
+            
+        # Verify that the LinkedIn session is active (assisting visibly if expired)
+        if any(url not in processed_history for url in candidate_urls):
+            ensure_linkedin_session(config)
+            
+        # Scrape and evaluate candidates
+        for url in candidate_urls:
+            if url in processed_history:
+                print(f"[Skipped] Candidate already processed: {url}")
+                continue
                 
-            # Scrape and evaluate candidates
-            for url in candidate_urls:
-                if url in processed_history:
-                    print(f"[Skipped] Candidate already processed: {url}")
-                    continue
-                    
-                # Scrape profile (includes Phase 1 country check)
-                profile = scrape_linkedin_profile(url, target_country, config)
-                
-                # Register URL in history logs
-                processed_history[url] = {
-                    "vacante": vac_file,
-                    "status": profile["status"],
-                    "name": profile["name"],
-                    "timestamp": pd.Timestamp.now().isoformat()
-                }
-                save_processed_urls(processed_history)
-                
-                # If discarded in Phase 1 due to location mismatch
-                if profile["status"] == "location_mismatch":
-                    candidate_record = {
-                        "vacancy": vac_file,
-                        "name": profile["name"] or "Unknown",
-                        "headline": profile["headline"] or "No headline",
-                        "technical_score": 0,
-                        "experience_score": 0,
-                        "auxiliary_score": 0,
-                        "score": 0,
-                        "open_to_work": False,
-                        "evaluation_summary": f"Automatically discarded: location mismatch. (Candidate location: '{profile.get('location')}', Job requires: '{target_country}').",
-                        "linkedin_url": url,
-                        "location": profile.get("location") or "Not specified",
-                        "about": profile.get("about") or "",
-                        "experience": profile.get("experience") or "",
-                        "skills": profile.get("skills") or "",
-                        "timestamp": pd.Timestamp.now().isoformat()
-                    }
-                    update_json_report(candidate_record)
-                    continue
-                    
-                # If scraping error occurred
-                if profile["status"] != "success":
-                    print(f"[Scraper Error] Could not process {url}: {profile['error_message']}")
-                    candidate_record = {
-                        "vacancy": vac_file,
-                        "name": profile["name"] or "Unknown",
-                        "headline": profile["headline"] or "No headline",
-                        "technical_score": 0,
-                        "experience_score": 0,
-                        "auxiliary_score": 0,
-                        "score": 0,
-                        "open_to_work": False,
-                        "evaluation_summary": f"Scraping error: {profile['error_message']}",
-                        "linkedin_url": url,
-                        "location": profile.get("location") or "Not specified",
-                        "about": profile.get("about") or "",
-                        "experience": profile.get("experience") or "",
-                        "skills": profile.get("skills") or "",
-                        "timestamp": pd.Timestamp.now().isoformat()
-                    }
-                    update_json_report(candidate_record)
-                    continue
-                    
-                # Perform full profile evaluation with Ollama
-                print(f"Evaluating candidate profile '{profile['name']}' against job description...")
-                evaluation = evaluate_candidate(profile, vacancy_text, config)
-                score = evaluation["match_score"]
-                open_to_work = evaluation["open_to_work"]
-                eval_summary = evaluation["evaluation_summary"]
-                
-                print(f"--> Match Score: {score}% | OpenToWork: {open_to_work}")
-                
-                # Save structured JSON candidate details
+            # Scrape profile (includes Phase 1 country check)
+            profile = scrape_linkedin_profile(url, target_country, config)
+            
+            # Register URL in history logs
+            processed_history[url] = {
+                "vacante": vac_file,
+                "status": profile["status"],
+                "name": profile["name"],
+                "timestamp": pd.Timestamp.now().isoformat()
+            }
+            save_processed_urls(processed_history)
+            
+            # If discarded in Phase 1 due to location mismatch
+            if profile["status"] == "location_mismatch":
                 candidate_record = {
                     "vacancy": vac_file,
                     "name": profile["name"] or "Unknown",
                     "headline": profile["headline"] or "No headline",
-                    "technical_score": int(evaluation.get("technical_score", 0)),
-                    "experience_score": int(evaluation.get("experience_score", 0)),
-                    "auxiliary_score": int(evaluation.get("auxiliary_score", 0)),
-                    "score": int(score),
-                    "open_to_work": bool(open_to_work),
-                    "evaluation_summary": eval_summary,
+                    "technical_score": 0,
+                    "experience_score": 0,
+                    "auxiliary_score": 0,
+                    "score": 0,
+                    "open_to_work": False,
+                    "evaluation_summary": f"Automatically discarded: location mismatch. (Candidate location: '{profile.get('location')}', Job requires: '{target_country}').",
                     "linkedin_url": url,
                     "location": profile.get("location") or "Not specified",
                     "about": profile.get("about") or "",
@@ -241,7 +207,73 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     "timestamp": pd.Timestamp.now().isoformat()
                 }
                 update_json_report(candidate_record)
+                continue
                 
+            # If scraping error occurred
+            if profile["status"] != "success":
+                print(f"[Scraper Error] Could not process {url}: {profile['error_message']}")
+                candidate_record = {
+                    "vacancy": vac_file,
+                    "name": profile["name"] or "Unknown",
+                    "headline": profile["headline"] or "No headline",
+                    "technical_score": 0,
+                    "experience_score": 0,
+                    "auxiliary_score": 0,
+                    "score": 0,
+                    "open_to_work": False,
+                    "evaluation_summary": f"Scraping error: {profile['error_message']}",
+                    "linkedin_url": url,
+                    "location": profile.get("location") or "Not specified",
+                    "about": profile.get("about") or "",
+                    "experience": profile.get("experience") or "",
+                    "skills": profile.get("skills") or "",
+                    "timestamp": pd.Timestamp.now().isoformat()
+                }
+                update_json_report(candidate_record)
+                continue
+                
+            # Perform full profile evaluation with Ollama
+            print(f"Evaluating candidate profile '{profile['name']}' against job description...")
+            evaluation = evaluate_candidate(profile, vacancy_text, config)
+            score = evaluation["match_score"]
+            open_to_work = evaluation["open_to_work"]
+            eval_summary = evaluation["evaluation_summary"]
+            
+            print(f"--> Match Score: {score}% | OpenToWork: {open_to_work}")
+            
+            # Save structured JSON candidate details
+            candidate_record = {
+                "vacancy": vac_file,
+                "name": profile["name"] or "Unknown",
+                "headline": profile["headline"] or "No headline",
+                "technical_score": int(evaluation.get("technical_score", 0)),
+                "experience_score": int(evaluation.get("experience_score", 0)),
+                "auxiliary_score": int(evaluation.get("auxiliary_score", 0)),
+                "score": int(score),
+                "open_to_work": bool(open_to_work),
+                "evaluation_summary": eval_summary,
+                "linkedin_url": url,
+                "location": profile.get("location") or "Not specified",
+                "about": profile.get("about") or "",
+                "experience": profile.get("experience") or "",
+                "skills": profile.get("skills") or "",
+                "timestamp": pd.Timestamp.now().isoformat()
+            }
+            update_json_report(candidate_record)
+            
+            if profile["status"] == "success":
+                evaluations_count += 1
+                
+            # Check target reached mid-page
+            if evaluations_count >= min_target:
+                print(f"[Info] Target reached: Evaluated {evaluations_count}/{min_target} candidates.")
+                break
+                
+        # If the target has not been reached yet, continue the search loop
+        if evaluations_count < min_target:
+            print(f"\n[Info] Evaluated {evaluations_count}/{min_target} candidates. Fetching next page of search results...")
+            continue
+            
         # Show interactive summary of candidates processed for this vacancy
         print(f"\n" + "=" * 60)
         print(f"   CANDIDATE SUMMARY FOR VACANCY: {vac_file}")
@@ -257,7 +289,7 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     vacancy_candidates = [c for c in all_cands if c.get("vacancy") == vac_file]
             except Exception:
                 pass
-        
+                
         if vacancy_candidates:
             # Sort by score descending
             vacancy_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -292,6 +324,8 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     use_refined = input("Would you like to execute the search with this refined query? (Y/N) [Y]: ").strip().lower()
                     if use_refined in ("", "y", "yes"):
                         refined_query = new_refined
+                        # Reset evaluations_count for the refined search loop to find N more candidates
+                        evaluations_count = 0
                     else:
                         print("[Info] Refined query discarded. Retrying with previous query.")
                 else:
@@ -328,10 +362,17 @@ def main():
                 print("Drop vacancy description files in the folder and try again.")
                 continue
                 
+            try:
+                target_input = input("\nEnter minimum candidates to evaluate for each vacancy in this run [5]: ").strip()
+                min_target = int(target_input) if target_input else 5
+            except ValueError:
+                print("[Info] Invalid input. Defaulting to 5.")
+                min_target = 5
+                
             print(f"\nStarting processing of {len(vacancy_files)} open vacancy(ies)...")
             for vac_file in vacancy_files:
                 processed_history = load_processed_urls()
-                process_vacancy(vac_file, "vacancies", config, processed_history)
+                process_vacancy(vac_file, "vacancies", config, processed_history, min_target)
                 
         elif opc == "2":
             history_files = [f for f in os.listdir("processed/archived_vacancies") if f.endswith(".txt")]
@@ -351,8 +392,16 @@ def main():
                 sel_idx = int(sel)
                 if 1 <= sel_idx <= len(history_files):
                     vac_file = history_files[sel_idx - 1]
+                    
+                    try:
+                        target_input = input("\nEnter minimum candidates to evaluate in this run [5]: ").strip()
+                        min_target = int(target_input) if target_input else 5
+                    except ValueError:
+                        print("[Info] Invalid input. Defaulting to 5.")
+                        min_target = 5
+                        
                     processed_history = load_processed_urls()
-                    process_vacancy(vac_file, "processed/archived_vacancies", config, processed_history)
+                    process_vacancy(vac_file, "processed/archived_vacancies", config, processed_history, min_target)
                 else:
                     print("Invalid option.")
             else:
