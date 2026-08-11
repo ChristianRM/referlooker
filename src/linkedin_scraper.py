@@ -9,8 +9,16 @@ def get_section_text(page, section_id: str) -> str:
     If it fails, attempts common heading text selectors (English & Spanish)
     to maintain compatibility across different profile layout languages.
     """
-    # 1. Try by ID (classic desktop selector)
-    xpath = f"//section[.//div[@id='{section_id}'] or .//span[@id='{section_id}'] or .//a[@id='{section_id}'] or .//*[@id='{section_id}']]"
+    # 1. Try by ID suffix case-insensitively (specific card container selector on modern LinkedIn)
+    try:
+        locator = page.locator(f"[id$='{section_id}' i]")
+        if locator.count() > 0:
+            return locator.first.inner_text().strip()
+    except Exception:
+        pass
+
+    # 2. Try by ID as a direct child of a section (classic layout card selector)
+    xpath = f"//section[./div[@id='{section_id}'] or ./span[@id='{section_id}'] or ./a[@id='{section_id}'] or ./*[@id='{section_id}']]"
     try:
         locator = page.locator(xpath)
         if locator.count() > 0:
@@ -18,7 +26,16 @@ def get_section_text(page, section_id: str) -> str:
     except Exception:
         pass
         
-    # 2. Fallback by heading text (h2)
+    # 3. Try by ID anywhere, but select the innermost section to avoid parent wrapper bloat
+    xpath_inner = f"//section[.//div[@id='{section_id}'] or .//span[@id='{section_id}'] or .//a[@id='{section_id}']][not(.//section[.//div[@id='{section_id}'] or .//span[@id='{section_id}'] or .//a[@id='{section_id}']])]"
+    try:
+        locator = page.locator(xpath_inner)
+        if locator.count() > 0:
+            return locator.first.inner_text().strip()
+    except Exception:
+        pass
+
+    # 3. Fallback by heading text (h2) - selecting the innermost section
     headings = []
     if section_id == "about":
         headings = ["About", "Acerca de", "Extracto"]
@@ -28,7 +45,7 @@ def get_section_text(page, section_id: str) -> str:
         headings = ["Skills", "Habilidades", "Aptitudes"]
         
     for heading in headings:
-        xpath_h = f"//section[.//h2[contains(text(), '{heading}')] or .//h3[contains(text(), '{heading}')] or .//*[contains(text(), '{heading}')]]"
+        xpath_h = f"//section[.//h2[contains(., '{heading}')] or .//h3[contains(., '{heading}')]][not(.//section[.//h2[contains(., '{heading}')] or .//h3[contains(., '{heading}')])]"
         try:
             locator = page.locator(xpath_h)
             if locator.count() > 0:

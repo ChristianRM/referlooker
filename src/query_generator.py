@@ -17,6 +17,26 @@ def clean_json_response(text: str) -> str:
         text = text[:-3]
     return text.strip()
 
+QUERY_RULES = """
+Rules for building the "search_query":
+1. Start the query directly with the site filter:
+   - For Mexico: `site:mx.linkedin.com/in/`
+   - For Spain: `site:es.linkedin.com/in/`
+   - For United States (USA): Use `site:linkedin.com/in/` and you MUST append `AND ("United States" OR "USA")` to the search query.
+   - For other countries: Use the corresponding LinkedIn country subdomain if one exists, or use `site:linkedin.com/in/` and append the country in quotes, e.g., `AND "CountryName"`.
+2. Wrap ALL multi-word phrases, role titles, and status terms in double quotes (e.g., "open to work" instead of open to work, "Senior Software Engineer" instead of Senior Software Engineer, "AI/ML Software Engineer").
+3. Include common variations for active job seeking wrapped in quotes, e.g., `("open to work" OR "open to opportunities")`.
+4. Determine appropriate role titles based on required seniority, making sure all multi-word titles are in double quotes:
+   - If the job description requires extremely high seniority (e.g., 12-15+ YOE) but demands hands-on coding/technical fluency, expand search titles to: `("Principal" OR "Staff" OR "Architect" OR "Lead")` combined with the role name. Do NOT include managerial-only titles like "Director" as they are typically not hands-on.
+   - Otherwise, use common industry titles (e.g., `"AWS Architect"`, `"Cloud Engineer"`, `"Python Developer"`).
+   - Never use internal project names, proprietary company codes (like AgentCore, IRC292142), or overly specific internal tags.
+5. Extract literal, specific technologies and frameworks from the "Good-to-Have", "Technical Fluency", or "Qualifications" sections (e.g., "LangChain", "AutoGen", "Copilot", "MCP" in double quotes).
+6. Do NOT assume or add external technologies by inertia (e.g., do NOT add generic tools like Kubernetes, Terraform, AWS, Docker unless they are explicitly written in the job description), as it limits the search and filters out ideal candidates.
+7. Keep the query short and simple. Use only 1 or 2 essential technologies or criteria from the JD with boolean OR.
+8. Every term in the query should follow this structure pattern:
+   `site:linkedin.com/in/ ("open to work" OR "open to opportunities") AND ("Principal" OR "Staff" OR "Architect" OR "Lead") AND ("AI/ML Software Engineer" OR "Senior Software Engineer") AND ("LangChain" OR "AutoGen" OR "Copilot") AND ("United States" OR "USA")`
+"""
+
 def generate_search_query(vacancy_text: str, config: dict) -> dict:
     """
     Calls local Ollama instance to analyze the vacancy description,
@@ -45,13 +65,7 @@ You must return a valid JSON object (and NOTHING else, no introductions, no mark
   "search_query": "Optimized Google X-Ray search query"
 }}
 
-Rules for building the "search_query":
-1. Start the query directly with `site:linkedin.com/in/`. Do NOT put parentheses around it (e.g., write `site:linkedin.com/in/ ("open to work" ...)` and NEVER `(site:linkedin.com/in/)`).
-2. REGIONAL LOCATION RULE: If the job description specifies a mandatory work country, adjust the start of the query to use the corresponding LinkedIn subdomain (e.g., if in Mexico, use `site:mx.linkedin.com/in/`. If in Spain, use `site:es.linkedin.com/in/`. If in the United States or global, use `site:linkedin.com/in/` and include the country or region in the search query, e.g., `AND ("United States" OR "USA")`).
-3. Include common variations for active job seeking, such as: `("open to work" OR "open to opportunities" OR "looking for opportunities")`.
-4. Include the simplified main role. Use common and generic job titles in the industry (e.g., `("AWS Architect" OR "Cloud Engineer" OR "DevOps")`). NEVER use internal project names, highly specific tools, or proprietary company codes (e.g., NEVER use 'AgentCore', 'IRC292142', etc.) as no candidate will have them in their headline.
-5. Add only 1 or 2 essential technologies using Boolean operators (e.g., `("Terraform" OR "Kubernetes")`). Keep the query short and simple; if you add too many mandatory AND operators, Google will return zero results. A broader search is preferred, allowing the evaluator module to filter details later.
-6. Avoid unnecessary quotes or overly long queries that break Google search.
+{QUERY_RULES}
 
 Respond ONLY with the JSON object.
 """
@@ -117,6 +131,9 @@ Follow these strict rules:
 {{
   "search_query": "New optimized query"
 }}
+
+{QUERY_RULES}
+
 Respond ONLY with the JSON object.
 """
     

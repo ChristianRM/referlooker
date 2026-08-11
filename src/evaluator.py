@@ -90,7 +90,33 @@ Headline: {profile_data.get('headline')}
 
     prompt = f"""
 You are an expert technical recruiter and HR specialist.
-Your goal is to evaluate a candidate's LinkedIn profile against the requirements of the job description.
+Evaluate the candidate's LinkedIn profile against the requirements of the job description.
+
+Strictly return a valid JSON object (and NOTHING else) in the following format:
+{{
+  "open_to_work": [true or false],
+  "technical_score": [integer, 0-40],
+  "experience_score": [integer, 0-40],
+  "auxiliary_score": [integer, 0-20],
+  "match_score": [integer, 0-100],
+  "evaluation_summary": "[2-3 sentences evaluation summary in English]"
+}}
+
+Instructions & Rules:
+1. **Open to Work Verification**:
+   Verify if the candidate is open to new opportunities or actively looking for work. Check the profile for explicit indicators (such as 'open to work', 'open to opportunities', 'seeking', 'looking for', 'disponible', 'disponibilidad', 'new challenges', etc.).
+   * If the profile contains such indicators, set "open_to_work" to true.
+   * If there are no active search indicators, set "open_to_work" to false.
+   * If "open_to_work" is false, set all scores (technical_score, experience_score, auxiliary_score, match_score) strictly to 0, and state in the "evaluation_summary" that the candidate is discarded because they are not looking for new opportunities.
+
+2. **Scoring Rubric (Only if open_to_work is true)**:
+   * **technical_score** (0-40): Fit for core programming languages, tools, libraries, and frameworks in the job description.
+   * **experience_score** (0-40): Fit for seniority level, leadership, and overall years of experience.
+   * **auxiliary_score** (0-20): Fit for databases, cloud platforms, DevOps, and other auxiliary tools.
+   * **match_score**: MUST be equal to technical_score + experience_score + auxiliary_score.
+
+3. **Geographic Location Check**:
+   If the job description specifies a mandatory location/country (e.g. USA, United States, Mexico), check if the candidate lives there. If they live in a different country, set the match_score and all sub-scores to 0.
 
 Job Description:
 \"\"\"
@@ -101,32 +127,6 @@ Candidate Profile (Extracted from LinkedIn):
 \"\"\"
 {profile_summary}
 \"\"\"
-
-You must strictly return a valid JSON object (and NOTHING else) in the following exact format:
-{{
-  "open_to_work": [true or false],
-  "technical_score": [integer, 0-40],
-  "experience_score": [integer, 0-40],
-  "auxiliary_score": [integer, 0-20],
-  "match_score": [integer, 0-100],
-  "evaluation_summary": "[2-3 sentences evaluation summary in English]"
-}}
-
-Evaluation Constraints & Rules:
-1. **Open to Work Verification**:
-   Verify if the candidate is actively looking for work by finding explicit indicators (such as 'open to work', 'looking for', 'seeking', 'open to opportunities', 'disponible', 'disponibilidad', 'new challenges', etc.) in their headline, about, or experience sections.
-   * If there are NO such explicit active search phrases in the profile, you MUST set "open_to_work" to false.
-   * If "open_to_work" is false, you MUST set "technical_score", "experience_score", "auxiliary_score", and "match_score" strictly to 0, and state in the "evaluation_summary" that the candidate is discarded because they are not looking for new opportunities.
-   * If they are actively searching, proceed to grade them using the rubric below.
-
-2. **Scoring Rubric (Only for active candidates)**:
-   * **technical_score** (0 to 40 points): Match for core programming languages, libraries, and frameworks specified in the job description.
-   * **experience_score** (0 to 40 points): Match for seniority level, leadership responsibilities, and overall years of experience (YOE) required.
-   * **auxiliary_score** (0 to 20 points): Match for databases, cloud platforms, containerization, DevOps tools, and auxiliary requirements.
-   * **match_score** (0 to 100 points): MUST equal exactly the sum of `technical_score + experience_score + auxiliary_score`.
-
-3. **Geographic Location Check**:
-   If the job description specifies a mandatory work country (e.g., Mexico or United States), verify if the candidate lives there. If they reside in a different country, set the "match_score" (and all sub-scores) strictly to 0, and justify the discard in the "evaluation_summary" (e.g., candidate is based in India but job requires Mexico).
 
 Respond ONLY with the JSON object.
 """
@@ -191,32 +191,44 @@ def evaluate_location_with_llm(header_text: str, target_country: str, config: di
     
     required = target_country if target_country.lower() not in ("any", "global", "remoto", "remote", "") else "Mexico or United States"
     
+    req_lower = required.lower()
+    if req_lower in ("usa", "us", "united states", "united states of america"):
+        normalized_required = "United States / USA"
+    elif req_lower in ("mexico", "mx", "méxico"):
+        normalized_required = "Mexico"
+    else:
+        normalized_required = required
+
     prompt = f"""
 You are an expert technical recruitment assistant specializing in international talent geolocation.
 Your exclusive task is to analyze a candidate's LinkedIn header info and determine if their current location is compatible with the location required for the job.
 
-Job Location Requirement: "{required}"
+Job Location Requirement: "{normalized_required}"
 
 Candidate LinkedIn Header Information:
 \"\"\"
 {header_text}
 \"\"\"
 
-Mandatory Reasoning Process:
-1. Identify the country required by the job (e.g., 'United States', 'Mexico', 'Spain', etc.). If the Job Location Requirement is "Mexico or United States", the permitted countries are Mexico or the United States.
-2. Identify the candidate's current country of residence from their header info (e.g., 'Mexico', 'Spain', 'Nigeria', 'India', etc.).
-3. Check if the candidate's country matches the required country (or is either Mexico or the United States in the default rule case).
-4. If the countries do not match (e.g., candidate is in Mexico or Spain but the job requires 'United States'), the value of "compatible" MUST strictly be false.
+Mandatory Reasoning & Location Resolution Rules:
+1. Identify the country required by the job (e.g., 'United States', 'Mexico', 'Spain', etc.).
+2. Resolve the candidate's current country of residence from their header info. Note that:
+   - Metropolitan areas, states, and cities belong to their respective countries. E.g., "Los Angeles Metropolitan Area", "San Francisco Bay Area", "Orange County", "Texas", "California", "New York" are all in the "United States / USA".
+   - "Jalisco", "Nuevo Leon", "CDMX", "Mexico City", "Guadalajara", "Monterrey" are all in "Mexico".
+   - If the header info lists a city/region without a country, use your general knowledge to infer the country.
+3. Compare the candidate's resolved country with the required country. Note that "United States", "USA", and "US" are the same country.
+4. Set "compatible" to:
+   - true: If the candidate's resolved country matches the required country (or is either Mexico or the United States if the requirement was "Mexico or United States").
+   - false: If they do not match (e.g., candidate is in El Salvador, India, or Costa Rica, but the job requires 'United States / USA').
 
 You must strictly return a valid JSON object (and absolutely NOTHING else, no comments, no explanations, no free text) in the following exact format:
 {{
   "vacancy_country": "Country required by the job (e.g., 'United States')",
-  "candidate_country": "Candidate country of residence (e.g., 'Mexico' or 'Spain')",
+  "candidate_country": "Resolved candidate country of residence (e.g., 'United States' or 'Mexico')",
   "compatible": false,
-  "extracted_location": "Full extracted location of the candidate (e.g., 'Lagos, Nigeria' or 'Hermosillo, Sonora, Mexico')"
+  "extracted_location": "Full extracted location of the candidate (e.g., 'Los Angeles Metropolitan Area' or 'Hermosillo, Sonora, Mexico')"
 }}
 
-Replace "compatible" with true if they are in the same country/region, or false if they are in different countries.
 Respond ONLY with the JSON object.
 """
     

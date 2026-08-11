@@ -138,9 +138,10 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
     satisfied = False
     refined_query = query
     evaluations_count = 0
+    current_run_urls = set()
     
-    # Calculate starting offset based on historical records for this vacancy
-    start_offset = sum(1 for url, info in processed_history.items() if info.get("vacante") == vac_file)
+    # Calculate starting offset based on historical records for this specific vacancy
+    start_offset = sum(1 for url, info in processed_history.items() if info.get("vacancy") == vac_file)
     current_offset = start_offset
     
     while not satisfied:
@@ -180,12 +181,13 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
             
             # Register URL in history logs
             processed_history[url] = {
-                "vacante": vac_file,
+                "vacancy": vac_file,
                 "status": profile["status"],
                 "name": profile["name"],
                 "timestamp": pd.Timestamp.now().isoformat()
             }
             save_processed_urls(processed_history)
+            current_run_urls.add(url)
             
             # If discarded in Phase 1 due to location mismatch
             if profile["status"] == "location_mismatch":
@@ -277,7 +279,6 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
         # Show interactive summary of candidates processed for this vacancy
         print(f"\n" + "=" * 60)
         print(f"   CANDIDATE SUMMARY FOR VACANCY: {vac_file}")
-        print(f"   (Required Country: {target_country})")
         print(f"=" * 60)
         
         vacancy_candidates = []
@@ -293,8 +294,13 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
         if vacancy_candidates:
             # Sort by score descending
             vacancy_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+            print(f"{'Candidate Name':<35} | Match Score")
+            print("-" * 60)
             for c in vacancy_candidates:
-                print(f"- {c.get('name')} | Score: {c.get('score')}% | Location: {c.get('location')} | URL: {c.get('linkedin_url')}")
+                name = c.get("name", "Unknown")
+                score = f"{c.get('score', 0)}%"
+                is_new = " [NEW]" if c.get("linkedin_url") in current_run_urls else ""
+                print(f"- {name + is_new:<33} | {score}")
         else:
             print("No candidates processed for this vacancy yet.")
         print("=" * 60)
@@ -324,8 +330,9 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     use_refined = input("Would you like to execute the search with this refined query? (Y/N) [Y]: ").strip().lower()
                     if use_refined in ("", "y", "yes"):
                         refined_query = new_refined
-                        # Reset evaluations_count for the refined search loop to find N more candidates
+                        # Reset evaluations_count and offset for the new refined search loop
                         evaluations_count = 0
+                        current_offset = 0
                     else:
                         print("[Info] Refined query discarded. Retrying with previous query.")
                 else:
@@ -362,6 +369,28 @@ def main():
                 print("Drop vacancy description files in the folder and try again.")
                 continue
                 
+            print("\nSelect the vacancy you wish to process:")
+            print("1. [Process all vacancies]")
+            for idx, file in enumerate(vacancy_files, 2):
+                print(f"{idx}. {file}")
+            print("q. [Back to main menu]")
+            
+            sel = input("\nOption: ").strip()
+            if sel.lower() == 'q':
+                continue
+            elif sel == "1":
+                selected_files = vacancy_files
+            elif sel.isdigit():
+                sel_idx = int(sel)
+                if 2 <= sel_idx <= len(vacancy_files) + 1:
+                    selected_files = [vacancy_files[sel_idx - 2]]
+                else:
+                    print("Invalid option.")
+                    continue
+            else:
+                print("Invalid option.")
+                continue
+                
             try:
                 target_input = input("\nEnter minimum candidates to evaluate for each vacancy in this run [5]: ").strip()
                 min_target = int(target_input) if target_input else 5
@@ -369,8 +398,8 @@ def main():
                 print("[Info] Invalid input. Defaulting to 5.")
                 min_target = 5
                 
-            print(f"\nStarting processing of {len(vacancy_files)} open vacancy(ies)...")
-            for vac_file in vacancy_files:
+            print(f"\nStarting processing of {len(selected_files)} open vacancy(ies)...")
+            for vac_file in selected_files:
                 processed_history = load_processed_urls()
                 process_vacancy(vac_file, "vacancies", config, processed_history, min_target)
                 
