@@ -2,6 +2,69 @@ import os
 import json
 import time
 from playwright.sync_api import sync_playwright
+from pypdf import PdfReader
+
+def extract_and_parse_pdf(pdf_path: str) -> dict:
+    """
+    Reads a LinkedIn exported PDF profile and parses it into structured sections.
+    """
+    sections = {
+        "about": "",
+        "experience": "",
+        "skills": "",
+        "raw_text": ""
+    }
+    
+    try:
+        reader = PdfReader(pdf_path)
+        pdf_text = ""
+        for page in reader.pages:
+            pdf_text += page.extract_text() + "\n"
+        
+        sections["raw_text"] = pdf_text.strip()
+        
+        lines = pdf_text.split("\n")
+        current_section = None
+        section_lines = []
+        
+        # Parse text into sections using English/Spanish headings
+        for line in lines:
+            line_stripped = line.strip()
+            # Boundary/trigger headings
+            if line_stripped in ("Summary", "Resumen", "Extracto"):
+                if current_section:
+                    sections[current_section] = "\n".join(section_lines).strip()
+                current_section = "about"
+                section_lines = []
+            elif line_stripped in ("Experience", "Experiencia"):
+                if current_section:
+                    sections[current_section] = "\n".join(section_lines).strip()
+                current_section = "experience"
+                section_lines = []
+            elif line_stripped in ("Top Skills", "Habilidades", "Aptitudes", "Habilidades principales"):
+                if current_section:
+                    sections[current_section] = "\n".join(section_lines).strip()
+                current_section = "skills"
+                section_lines = []
+            elif line_stripped in ("Education", "Educación", "Languages", "Idiomas", "Certifications", "Certificaciones", "Projects", "Proyectos"):
+                # End of a section we care about
+                if current_section:
+                    sections[current_section] = "\n".join(section_lines).strip()
+                current_section = None
+                section_lines = []
+            else:
+                if current_section:
+                    section_lines.append(line)
+                    
+        # Grab any remaining text in the active section
+        if current_section:
+            sections[current_section] = "\n".join(section_lines).strip()
+            
+    except Exception as e:
+        print(f"[Warning] Failed to extract text from PDF: {e}")
+        
+    return sections
+
 
 def get_section_text(page, section_id: str) -> str:
     """
@@ -190,76 +253,185 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
                 return profile_data
                 
             # --- PHASE 2: FULL PROFILE SCRAPING ---
-            # Progressively scroll down to trigger lazy loading of profile sections
-            print("Loading full profile sections (scrolling)...")
+            pdf_success = False
+            
             try:
-                for i in range(1, 5):
-                    page.evaluate(f"window.scrollTo(0, {i * 800})")
-                    page.wait_for_timeout(1200)
+                print("Attempting to download profile as PDF...")
+                more_btn = None
+                all_buttons = page.locator("button")
+                count = all_buttons.count()
+                
+                # Search for the "More" / "Más" button (excluding top navigation buttons)
+                for i in range(count):
+                    btn = all_buttons.nth(i)
+                    try:
+                        box = btn.bounding_box()
+                        if not box or box['y'] < 120:
+                            continue
+                            
+                        btn_text = btn.inner_text().strip().lower()
+                        aria_label = (btn.get_attribute("aria-label") or "").lower()
+                        cls = (btn.get_attribute("class") or "").lower()
+                        testid = (btn.get_attribute("data-testid") or "").lower()
+                        
+                        if btn.is_visible():
+                            # Exclude description expanders
+                            if "expandable" in testid or "expand" in cls or "inline-show-more" in cls:
+                                continue
+                                
+                            is_more = False
+                            if btn_text in ("more", "más", "mas") or btn_text == "...":
+                                is_more = True
+                            elif "more actions" in aria_label or "más acciones" in aria_label or "mas acciones" in aria_label:
+                                is_more = True
+                            elif aria_label == "more" or aria_label == "más" or aria_label == "mas":
+                                is_more = True
+                                
+                            if is_more:
+                                more_btn = btn
+                                break
+                    except Exception:
+                        pass
+                
+                # Fallback: look for a button with dropdown/haspopup properties in the header card
+                if not more_btn:
+                    for i in range(count):
+                        btn = all_buttons.nth(i)
+                        try:
+                            box = btn.bounding_box()
+                            if box and box['y'] > 120 and btn.is_visible():
+                                has_popup = btn.get_attribute("aria-haspopup") or ""
+                                if has_popup == "true" or "dropdown" in (btn.get_attribute("class") or "").lower():
+                                    more_btn = btn
+                                    break
+                        except Exception:
+                            pass
+                
+                if more_btn:
+                    print("Clicking 'More' button...")
+                    more_btn.click(force=True)
+                    page.wait_for_timeout(2000)
+                    
+                    # Search for the "Save to PDF" / "Guardar como PDF" menu item
+                    pdf_option = None
+                    options = page.locator(".artdeco-dropdown__item, span, div, button")
+                    opt_count = options.count()
+                    
+                    for i in range(opt_count):
+                        opt = options.nth(i)
+                        try:
+                            if opt.is_visible():
+                                opt_text = opt.inner_text().strip().lower()
+                                if "save to pdf" in opt_text or "guardar como pdf" in opt_text or "guardar en pdf" in opt_text:
+                                    if len(opt_text) < 40:
+                                        pdf_option = opt
+                                        break
+                        except Exception:
+                            pass
+                            
+                    if pdf_option:
+                        print("Triggering PDF export download...")
+                        with page.expect_download(timeout=15000) as download_info:
+                            pdf_option.click(force=True)
+                        download = download_info.value
+                        
+                        safe_name = "".join(c if c.isalnum() else "_" for c in (profile_data["name"] or "candidate"))
+                        pdf_filename = f"{safe_name}_{int(time.time())}.pdf"
+                        pdf_dir = os.path.join("output", "pdfs")
+                        os.makedirs(pdf_dir, exist_ok=True)
+                        pdf_path = os.path.join(pdf_dir, pdf_filename)
+                        
+                        download.save_as(pdf_path)
+                        print(f"PDF successfully saved to: {pdf_path}")
+                        
+                        # Parse the downloaded PDF
+                        parsed = extract_and_parse_pdf(pdf_path)
+                        if parsed["raw_text"] and len(parsed["raw_text"]) > 200:
+                            profile_data["raw_text"] = parsed["raw_text"]
+                            profile_data["about"] = parsed["about"]
+                            profile_data["experience"] = parsed["experience"]
+                            profile_data["skills"] = parsed["skills"]
+                            pdf_success = True
+                            print("Successfully extracted profile details from PDF.")
+                        else:
+                            print("[Warning] PDF extraction returned empty/insufficient content.")
+                    else:
+                        print("[Warning] PDF download option not found in menu.")
+                else:
+                    print("[Warning] 'More' button not found.")
+                    
             except Exception as e:
-                print(f"[Debug] Scroll error: {e}")
-            
-            # Click all "see more" buttons to expand descriptions
-            expand_collapsed_sections(page)
-            
-            # Extract sections by their ID anchor tags
-            profile_data["about"] = get_section_text(page, "about")
-            profile_data["experience"] = get_section_text(page, "experience")
-            profile_data["skills"] = get_section_text(page, "skills")
-            
-            # Reconstruct profile base URL without trailing query arguments
-            base_profile_url = profile_url
-            if "/in/" in profile_url:
+                print(f"[Warning] PDF scraping flow failed: {e}")
+                
+            if not pdf_success:
+                print("[Fallback] Falling back to standard HTML scrolling and scraping...")
+                # Progressively scroll down to trigger lazy loading of profile sections
                 try:
-                    parts = profile_url.split("/in/")
-                    username = parts[1].split("/")[0].split("?")[0]
-                    base_profile_url = f"https://www.linkedin.com/in/{username}"
+                    for i in range(1, 5):
+                        page.evaluate(f"window.scrollTo(0, {i * 800})")
+                        page.wait_for_timeout(1200)
+                except Exception as e:
+                    print(f"[Debug] Scroll error: {e}")
+                
+                # Click all "see more" buttons to expand descriptions
+                expand_collapsed_sections(page)
+                
+                # Extract sections by their ID anchor tags
+                profile_data["about"] = get_section_text(page, "about")
+                profile_data["experience"] = get_section_text(page, "experience")
+                profile_data["skills"] = get_section_text(page, "skills")
+                
+                # Reconstruct profile base URL without trailing query arguments
+                base_profile_url = profile_url
+                if "/in/" in profile_url:
+                    try:
+                        parts = profile_url.split("/in/")
+                        username = parts[1].split("/")[0].split("?")[0]
+                        base_profile_url = f"https://www.linkedin.com/in/{username}"
+                    except Exception:
+                        pass
+                
+                # Self-Healing: If experience section is empty, navigate directly to details page
+                if not profile_data["experience"] or len(profile_data["experience"].strip()) < 15:
+                    print(f"[Self-Healing] Empty experience on main page. Navigating to experience details subpage...")
+                    try:
+                        exp_url = base_profile_url.rstrip("/") + "/details/experience/"
+                        page.goto(exp_url, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2000)
+                        for _ in range(3):
+                            page.keyboard.press("PageDown")
+                            page.wait_for_timeout(600)
+                        main_text = page.locator("main").inner_text() or page.locator("body").inner_text()
+                        if len(main_text.strip()) > 100:
+                            profile_data["experience"] = main_text.strip()
+                            print("[Self-Healing] Experience successfully recovered from details subpage.")
+                    except Exception as e:
+                        print(f"[Self-Healing] Error trying to recover experience: {e}")
+                        
+                # Self-Healing: If skills section is empty, navigate directly to skills details page
+                if not profile_data["skills"] or len(profile_data["skills"].strip()) < 15:
+                    print(f"[Self-Healing] Empty skills on main page. Navigating to skills details subpage...")
+                    try:
+                        skills_url = base_profile_url.rstrip("/") + "/details/skills/"
+                        page.goto(skills_url, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(2000)
+                        for _ in range(3):
+                            page.keyboard.press("PageDown")
+                            page.wait_for_timeout(600)
+                        main_text = page.locator("main").inner_text() or page.locator("body").inner_text()
+                        if len(main_text.strip()) > 100:
+                            profile_data["skills"] = main_text.strip()
+                            print("[Self-Healing] Skills successfully recovered from details subpage.")
+                    except Exception as e:
+                        print(f"[Self-Healing] Error trying to recover skills: {e}")
+                
+                # Navigate back to primary profile page if we ended up on details pages
+                try:
+                    if page.url != profile_url:
+                        page.goto(profile_url, wait_until="domcontentloaded", timeout=20000)
+                    profile_data["raw_text"] = page.locator("body").inner_text()
                 except Exception:
                     pass
-            
-            # Self-Healing: If experience section is empty, navigate directly to details page
-            if not profile_data["experience"] or len(profile_data["experience"].strip()) < 15:
-                print(f"[Self-Healing] Empty experience on main page. Navigating to experience details subpage...")
-                try:
-                    exp_url = base_profile_url.rstrip("/") + "/details/experience/"
-                    page.goto(exp_url, wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(2000)
-                    # PageDown key scroll loop to load content
-                    for _ in range(3):
-                        page.keyboard.press("PageDown")
-                        page.wait_for_timeout(600)
-                    # Retrieve text from main container or body
-                    main_text = page.locator("main").inner_text() or page.locator("body").inner_text()
-                    if len(main_text.strip()) > 100:
-                        profile_data["experience"] = main_text.strip()
-                        print("[Self-Healing] Experience successfully recovered from details subpage.")
-                except Exception as e:
-                    print(f"[Self-Healing] Error trying to recover experience: {e}")
-                    
-            # Self-Healing: If skills section is empty, navigate directly to skills details page
-            if not profile_data["skills"] or len(profile_data["skills"].strip()) < 15:
-                print(f"[Self-Healing] Empty skills on main page. Navigating to skills details subpage...")
-                try:
-                    skills_url = base_profile_url.rstrip("/") + "/details/skills/"
-                    page.goto(skills_url, wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(2000)
-                    for _ in range(3):
-                        page.keyboard.press("PageDown")
-                        page.wait_for_timeout(600)
-                    main_text = page.locator("main").inner_text() or page.locator("body").inner_text()
-                    if len(main_text.strip()) > 100:
-                        profile_data["skills"] = main_text.strip()
-                        print("[Self-Healing] Skills successfully recovered from details subpage.")
-                except Exception as e:
-                    print(f"[Self-Healing] Error trying to recover skills: {e}")
-            
-            # Navigate back to primary profile page if we ended up on details pages
-            try:
-                if page.url != profile_url:
-                    page.goto(profile_url, wait_until="domcontentloaded", timeout=20000)
-                profile_data["raw_text"] = page.locator("body").inner_text()
-            except Exception:
-                pass
                 
             # Verify if we extracted valid candidate details or fell into a signup/login wall
             name_lower = profile_data["name"].lower()

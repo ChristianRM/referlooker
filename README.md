@@ -16,9 +16,11 @@ graph TD
     B -->|Search with geographic subdomains| C{Search Engine: Google CSE / SerpAPI or Playwright Fallback}
     C -->|Retrieve LinkedIn /in/ profile URLs| D(Playwright: Extract Profile)
     D -->|Visit profile with session cookies| E{Phase 1: Geographic Location Check}
-    E -->|Location matches requirement| F[Phase 2: Full Profile Scraping]
+    E -->|Location matches requirement| F{Phase 2: Save to PDF & Parse}
+    F -->|Success| H(Local Ollama: Candidate Evaluation)
+    F -->|Fail Fallback| F_FB[HTML Scrolling & Direct Subpage Scraping]
+    F_FB --> H
     E -->|Location mismatch| G[Auto-Discard - Score 0%]
-    F -->|Profile sections extracted| H(Local Ollama: Candidate Evaluation)
     H -->|Analyze skills, experience, and OpenToWork| I{Score >= 85%}
     I -->|Yes| J[candidates.json Database]
     I -->|No| K[undesirable_candidates in candidates.json]
@@ -41,6 +43,7 @@ graph TD
     *   `candidates.json`: Structured database containing details of all candidates evaluated (desirable and undesirable). This is the single source of truth for all candidate records.
     *   `processed_urls.json`: History log of scraped profile URLs to avoid double-processing and API waste.
     *   `referral_bot.log`: Log file mapping all system terminal events.
+    *   `pdfs/`: Folder containing downloaded LinkedIn PDF profiles of candidates for parser reference.
 
 ---
 
@@ -143,7 +146,9 @@ q. Quit
     *   Find candidates using the search APIs (or headful Playwright fallback).
     *   Scrape each profile using Playwright and your cookies.
     *   **Immediate Location Filter**: Check the candidate's country. If it does not match the vacancy requirements, the candidate is discarded immediately (`Score: 0%`) to save resources.
-    *   **LLM Screening**: If location matches, extract About, Experience, and Skills, and ask Ollama to generate a detailed match score, OpenToWork verification, and strengths/gaps summary in English.
+    *   **PDF Profile Extraction**: If the location matches, the scraper attempts to click the "More" button on the candidate's profile to download it natively as a PDF and parse it using `pypdf` to extract the full profile text cleanly.
+    *   **Fallback Scraping**: If PDF download fails, the scraper falls back to standard HTML scrolling, expanding text, and extracting details from specific profile subpages.
+    *   **LLM Screening**: Based on the extracted profile content, the system asks Ollama to generate a detailed match score, OpenToWork verification, and strengths/gaps summary in English.
     *   **Database Storage**: All candidates are saved directly into the JSON candidate database: `output/candidates.json`.
 4.  Once a vacancy run finishes, the script lists candidates and prompts:
     `Are you satisfied with the results obtained for vacancy '[title]'? (Y/N) [Y]:`
@@ -176,11 +181,19 @@ Inside this interactive CLI, you can:
 
 ## 🔍 Technical Details
 
-### Scraper Self-Healing Mechanisms
-The LinkedIn profile scraper ([`linkedin_scraper.py`](file:///d:/Documents/Automations/ReferLooker/src/linkedin_scraper.py)) implements automated error recovery to handle dynamic UI changes:
-*   **Lazy Loading Scroll Loop**: Progressively scrolls down per profile visit to trigger LinkedIn's asynchronous loading of experience and skills sections.
-*   **Button Expansion**: Automatically finds and clicks "see more" and "show more" buttons to retrieve hidden texts.
-*   **Direct Subpage Extraction**: If a profile renders sections as empty (due to LinkedIn layout overrides), Playwright will bypass the main page and navigate directly to the specific detail subpages (e.g., `linkedin.com/in/username/details/experience/` and `skills/`) to force a clean text extraction.
+### Profile Extraction Strategy & Fallbacks
+The LinkedIn profile scraper ([`linkedin_scraper.py`](file:///d:/Documents/Automations/ReferLooker/src/linkedin_scraper.py)) employs a multi-tiered strategy to fetch complete profile details:
+
+1. **Primary: Native PDF Export & Parsing (Recommended)**
+   * Locates the profile's action menu by clicking the "More" (`Más` / `...`) button.
+   * Clicks "Save to PDF" (`Guardar como PDF` / `Guardar en PDF`) to download the profile.
+   * Saves the document under `output/pdfs/` and parses it using `pypdf` to cleanly extract *About*, *Experience*, and *Skills*. This avoids issues with dynamic class names and missing elements.
+
+2. **Fallback: Standard HTML Scraping & Self-Healing**
+   If PDF extraction fails or is unavailable:
+   * **Lazy Loading Scroll Loop**: Progressively scrolls down to trigger LinkedIn's asynchronous loading of sections.
+   * **Button Expansion**: Automatically clicks "see more" and "show more" buttons to reveal truncated text blocks.
+   * **Direct Subpage Extraction**: If HTML sections are missing, Playwright bypasses the main profile layout and navigates directly to LinkedIn detail subpages (e.g., `/details/experience/` and `/details/skills/`) to force text extraction.
 
 ### Session Security & Protection
 *   The script verifies session status on startup. If LinkedIn requests verification, the script opens a headful window allowing you to log in.
