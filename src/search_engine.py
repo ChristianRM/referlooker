@@ -1,8 +1,64 @@
 import os
+import re
 import time
 import requests
 import urllib.parse
 from playwright.sync_api import sync_playwright
+
+RESERVED_SLUGS = {
+    "dir", "jobs", "company", "school", "pulse", "posts", "share",
+    "learning", "feed", "groups", "events", "newsletters", "help",
+    "mynetwork", "messaging", "notifications"
+}
+
+def clean_linkedin_url(url: str) -> str:
+    """
+    Cleans and validates that the URL corresponds to an individual LinkedIn profile.
+    Unpacks Google redirect links (/url?q=..., /url?url=...), removes tracking and query params,
+    and normalizes to https://www.linkedin.com/in/{username}.
+    """
+    if not url:
+        return ""
+        
+    try:
+        raw_url = str(url).strip()
+        
+        # Unquote up to twice to handle nested URL encoding in redirects
+        for _ in range(2):
+            decoded = urllib.parse.unquote(raw_url)
+            if decoded == raw_url:
+                break
+            raw_url = decoded
+            
+        # Check if wrapped in a Google redirect
+        if "google." in raw_url and "/url" in raw_url:
+            parsed_g = urllib.parse.urlparse(raw_url)
+            qs = urllib.parse.parse_qs(parsed_g.query)
+            target = qs.get("q", [None])[0] or qs.get("url", [None])[0]
+            if target:
+                raw_url = urllib.parse.unquote(target)
+                
+        # Regex search for linkedin.com/in/{slug}
+        # Matches subdomains (mx.linkedin.com, www.linkedin.com, linkedin.com, etc.)
+        match = re.search(r'(?:https?://)?(?:[a-zA-Z0-9_\-]+\.)?linkedin\.com/in/([a-zA-Z0-9_\-%]+)', raw_url, re.IGNORECASE)
+        if match:
+            slug = match.group(1).strip("/").strip()
+            # Clean any trailing parameters or path fragments that might have attached
+            if "?" in slug:
+                slug = slug.split("?")[0]
+            if "&" in slug:
+                slug = slug.split("&")[0]
+            if "#" in slug:
+                slug = slug.split("#")[0]
+            if "/" in slug:
+                slug = slug.split("/")[0]
+                
+            slug_lower = slug.lower()
+            if slug and slug_lower not in RESERVED_SLUGS and len(slug) >= 2:
+                return f"https://www.linkedin.com/in/{slug}"
+    except Exception:
+        pass
+    return ""
 
 def search_candidates_via_playwright(query: str, max_results: int, config: dict, start_offset: int = 0) -> list:
     """
@@ -10,12 +66,15 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict,
     Serves as a fallback mechanism if Google CSE fails with 403 errors or quota limits.
     """
     urls = []
-    # Force headless=False for Google search to avoid bot detection and allow solving CAPTCHAs
-    print(f"[Fallback] Launching direct Google search with Playwright in headful mode (headless=False) at offset {start_offset}...")
+    # Force headful mode with stealth flags for Google search
+    print(f"[Fallback] Launching direct Google search with Playwright in headful mode at offset {start_offset}...")
     
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 720}
@@ -36,33 +95,69 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict,
                 print("The script will wait for you to complete it before continuing automatically...")
                 print("!" * 50 + "\n")
                 
-                # Wait up to 2 minutes for the URL to no longer be the CAPTCHA page
+                # Wait up to 2 minutes for the user to solve the CAPTCHA
                 try:
                     for _ in range(120):
-                        page.wait_for_timeout(1000)  # Allow Playwright to process events and update page URL
+                        page.wait_for_timeout(1000)
                         if "google.com/sorry" not in page.url:
-                            print("[Success] CAPTCHA resolved. Continuing with extraction...")
+                            print("[Success] CAPTCHA resolved. Waiting for search results to load...")
+                            page.wait_for_timeout(3000)
                             break
                 except Exception:
                     pass
             
-            # Wait for Google search results container (#search) to render
-            try:
-                page.wait_for_selector("#search", timeout=5000)
-            except Exception:
-                # Fallback if it does not render but links might still be present
-                page.wait_for_timeout(2000)
-            
-            # Extract all anchor tags (a) hrefs that correspond to LinkedIn profiles
-            hrefs = page.eval_on_selector_all("a", "elements => elements.map(el => el.href)")
-            
-            for href in hrefs:
-                cleaned = clean_linkedin_url(href)
-                if cleaned:
-                    urls.append(cleaned)
-                    if len(urls) >= max_results:
+            # Polling loop: Wait up to 15 seconds for search results to render and extract links
+            extracted = []
+            for attempt in range(15):
+                try:
+                    # If still stuck on sorry page, continue waiting
+                    if "google.com/sorry" in page.url:
+                        page.wait_for_timeout(1000)
+                        continue
+                        
+                    # Extract from anchor elements
+                    elements_data = page.eval_on_selector_all(
+                        "a", 
+                        "els => els.map(e => ({ href: e.href, attrHref: e.getAttribute('href'), dataHref: e.getAttribute('data-href'), ping: e.getAttribute('ping') }))"
+                    )
+                    
+                    for item in elements_data:
+                        for candidate_link in [item.get("href"), item.get("attrHref"), item.get("dataHref"), item.get("ping")]:
+                            if candidate_link:
+                                cleaned = clean_linkedin_url(candidate_link)
+                                if cleaned and cleaned not in extracted:
+                                    extracted.append(cleaned)
+                                    if len(extracted) >= max_results:
+                                        break
+                        if len(extracted) >= max_results:
+                            break
+                            
+                    # Fallback: scan page HTML for LinkedIn profile links if none found yet
+                    if not extracted:
+                        html_content = page.content()
+                        # Unescape backslashes if any exist in JSON embedded in HTML
+                        clean_html = html_content.replace("\\/", "/")
+                        matches = re.findall(r'(?:https?://)?(?:[a-zA-Z0-9_\-]+\.)?linkedin\.com/in/([a-zA-Z0-9_\-%]+)', clean_html, re.IGNORECASE)
+                        for slug in matches:
+                            cleaned = clean_linkedin_url(f"https://www.linkedin.com/in/{slug}")
+                            if cleaned and cleaned not in extracted:
+                                extracted.append(cleaned)
+                                if len(extracted) >= max_results:
+                                    break
+                                    
+                    if extracted:
+                        print(f"[Success] Extracted {len(extracted)} candidate LinkedIn profile(s) from search results.")
                         break
                         
+                except Exception as e:
+                    # Handle brief moments where page context is navigating
+                    pass
+                    
+                page.wait_for_timeout(1000)
+                
+            urls = extracted[:max_results]
+            # Brief pause before closing browser so user sees successful extraction
+            page.wait_for_timeout(1000)
             browser.close()
         except Exception as e:
             print(f"[Fallback Error] Direct Google search failed: {e}")
@@ -93,28 +188,6 @@ def load_dotenv(dotenv_path=".env"):
 # Load environment variables on module import
 load_dotenv()
 
-def clean_linkedin_url(url: str) -> str:
-    """
-    Cleans and validates that the URL corresponds to an individual LinkedIn profile.
-    Removes additional query parameters (?miniProfile=..., etc.).
-    """
-    try:
-        # Decode URL in case it is URL-encoded
-        decoded_url = urllib.parse.unquote(url)
-        parsed = urllib.parse.urlparse(decoded_url)
-        
-        # Check if it is a LinkedIn profile link
-        if "linkedin.com/in/" in parsed.netloc + parsed.path:
-            # Reconstruct clean URL using only path (e.g. /in/candidate-name/)
-            path = parsed.path
-            # Remove trailing slashes
-            path = path.rstrip("/")
-            clean_url = f"https://www.linkedin.com{path}"
-            return clean_url
-    except Exception:
-        pass
-    return ""
-
 def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
     """
     Executes search query on Google via Google Custom Search or SerpAPI.
@@ -141,7 +214,6 @@ def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
             print("[Warning] Activating Playwright fallback search...")
             return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
             
-        url = "https://www.googleapis.com/customsearch/v1"
         params = {
             "key": api_key,
             "cx": cx,
@@ -151,32 +223,39 @@ def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
         if start_offset > 0:
             params["start"] = start_offset + 1
             
-        try:
-            response = requests.get(url, params=params, timeout=15)
-            if response.status_code != 200:
-                try:
-                    error_json = response.json()
-                    error_msg = error_json.get("error", {}).get("message", "No detailed message")
-                    print(f"[Error] Google CSE returned code {response.status_code}: {error_msg}")
-                except Exception:
-                    print(f"[Error] Google CSE returned code {response.status_code}: {response.text}")
+        # Try primary Custom Search API endpoint (v1) and fallback to siterestrict if configured
+        endpoints = [
+            "https://www.googleapis.com/customsearch/v1",
+            "https://www.googleapis.com/customsearch/v1/siterestrict"
+        ]
+        
+        cse_success = False
+        for url in endpoints:
+            try:
+                response = requests.get(url, params=params, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get("items", [])
+                    for item in items:
+                        link = item.get("link", "")
+                        cleaned = clean_linkedin_url(link)
+                        if cleaned and cleaned not in urls:
+                            urls.append(cleaned)
+                    cse_success = True
+                    break
+                else:
+                    try:
+                        error_json = response.json()
+                        error_msg = error_json.get("error", {}).get("message", "No detailed message")
+                    except Exception:
+                        error_msg = response.text
+                    print(f"[Notice] Google CSE endpoint '{url}' returned code {response.status_code}: {error_msg}")
+            except Exception as e:
+                print(f"[Error] Search with Google CSE endpoint '{url}' failed: {e}")
                 
-                # Automatic fallback on 400 or 403 errors
-                if response.status_code in (400, 403):
-                    print("[Warning] Google CSE error detected. Activating direct Playwright fallback search...")
-                    return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
-                return []
-                
-            response.raise_for_status()
-            data = response.json()
-            items = data.get("items", [])
-            for item in items:
-                link = item.get("link", "")
-                cleaned = clean_linkedin_url(link)
-                if cleaned:
-                    urls.append(cleaned)
-        except Exception as e:
-            print(f"[Error] Search with Google CSE failed: {e}")
+        if not cse_success and not urls:
+            print("[Warning] Google CSE was unsuccessful. Activating direct Playwright fallback search...")
+            return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
             
     elif engine == "serpapi":
         # Prioritize environment variables (from .env file)

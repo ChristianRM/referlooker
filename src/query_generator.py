@@ -19,22 +19,23 @@ def clean_json_response(text: str) -> str:
 
 QUERY_RULES = """
 Rules for building the "search_query":
-1. Start the query directly with the site filter:
-   - For Mexico: `site:mx.linkedin.com/in/`
-   - For Spain: `site:es.linkedin.com/in/`
-   - For United States (USA): Use `site:linkedin.com/in/` and you MUST append `AND ("United States" OR "USA")` to the search query.
-   - For other countries: Use the corresponding LinkedIn country subdomain if one exists, or use `site:linkedin.com/in/` and append the country in quotes, e.g., `AND "CountryName"`.
-2. Wrap ALL multi-word phrases, role titles, and status terms in double quotes (e.g., "open to work" instead of open to work, "Senior Software Engineer" instead of Senior Software Engineer, "AI/ML Software Engineer").
-3. Include common variations for active job seeking wrapped in quotes, e.g., `("open to work" OR "open to opportunities")`.
-4. Determine appropriate role titles based on required seniority, making sure all multi-word titles are in double quotes:
-   - If the job description requires extremely high seniority (e.g., 12-15+ YOE) but demands hands-on coding/technical fluency, expand search titles to: `("Principal" OR "Staff" OR "Architect" OR "Lead")` combined with the role name. Do NOT include managerial-only titles like "Director" as they are typically not hands-on.
-   - Otherwise, use common industry titles (e.g., `"AWS Architect"`, `"Cloud Engineer"`, `"Python Developer"`).
-   - Never use internal project names, proprietary company codes (like AgentCore, IRC292142), or overly specific internal tags.
-5. Extract literal, specific technologies and frameworks from the "Good-to-Have", "Technical Fluency", or "Qualifications" sections (e.g., "LangChain", "AutoGen", "Copilot", "MCP" in double quotes).
-6. Do NOT assume or add external technologies by inertia (e.g., do NOT add generic tools like Kubernetes, Terraform, AWS, Docker unless they are explicitly written in the job description), as it limits the search and filters out ideal candidates.
-7. Keep the query short and simple. Use only 1 or 2 essential technologies or criteria from the JD with boolean OR.
-8. Every term in the query should follow this structure pattern:
-   `site:linkedin.com/in/ ("open to work" OR "open to opportunities") AND ("Principal" OR "Staff" OR "Architect" OR "Lead") AND ("AI/ML Software Engineer" OR "Senior Software Engineer") AND ("LangChain" OR "AutoGen" OR "Copilot") AND ("United States" OR "USA")`
+1. ALWAYS start the query directly with `site:linkedin.com/in/`. NEVER use country subdomains like `mx.linkedin.com/in/` or `es.linkedin.com/in/`.
+   - If a specific country is required (e.g. Mexico, United States, Spain), append the country filter at the end of the query:
+     - For Mexico: `AND ("Mexico" OR "México")`
+     - For Spain: `AND ("Spain" OR "España")`
+     - For United States: `AND ("United States" OR "USA")`
+     - For other countries: `AND "CountryName"`
+2. Wrap ALL multi-word phrases and role titles in double quotes.
+3. Include active job search and OpenToWork terms using OR variations to capture actively looking candidates:
+   `("open to work" OR "opentowork" OR "#opentowork" OR "seeking" OR "looking for" OR "disponible" OR "open to opportunities")`
+4. Determine appropriate role titles based on required seniority and tech stack:
+   - Group role title variations together with OR (e.g. `("Senior Full Stack Engineer" OR "Senior Software Engineer" OR "Senior Full Stack Developer")`).
+   - Do not create conflicting AND clauses for seniority titles.
+   - Never use internal company codes (e.g., IRC292142, Gtech) or overly specific internal tags.
+5. Extract only 1 or 2 essential core technologies from the JD (e.g., `("Java" OR "Kotlin")`).
+6. Keep the query clean and concise with boolean OR groups to allow Google to return relevant profiles.
+7. Every term in the query should follow this structure pattern:
+   `site:linkedin.com/in/ ("open to work" OR "opentowork" OR "#opentowork" OR "seeking" OR "looking for" OR "disponible") AND ("Senior Full Stack Engineer" OR "Senior Software Engineer" OR "Senior Full Stack Developer") AND ("Java" OR "Kotlin") AND ("Mexico" OR "México")`
 """
 
 def generate_search_query(vacancy_text: str, config: dict) -> dict:
@@ -124,7 +125,7 @@ Previous Search Query:
 
 Your goal is to generate a new, optimized, and alternative X-Ray search query.
 Follow these strict rules:
-1. Start directly with `site:linkedin.com/in/` (or the corresponding country subdomain if a specific country is required).
+1. Start directly with `site:linkedin.com/in/`.
 2. Change terms to make it broader, or use alternative synonyms for the role and technologies.
 3. If the previous query had too many AND operators, reduce them to allow Google to return more profiles.
 4. Return only a valid JSON object (and absolutely NOTHING else) in the following exact format:

@@ -149,6 +149,61 @@ def expand_collapsed_sections(page):
     except Exception:
         pass
 
+def detect_open_to_work_in_page(page) -> tuple:
+    """
+    Checks the LinkedIn profile DOM and images for explicit OpenToWork indicators:
+    1. #OpenToWork frame/badge on profile picture.
+    2. Open to work carousel or card in the top profile section.
+    3. Active search text signals in header/headline.
+    Returns (is_open_to_work: bool, source_description: str).
+    """
+    try:
+        # 1. Check profile photo alt and badge attributes
+        photo_badge_locators = [
+            "img[alt*='Open to work' i]",
+            "img[alt*='#OpenToWork' i]",
+            "img[alt*='Buscando empleo' i]",
+            "img[alt*='Abierto a trabajar' i]",
+            ".pv-top-card-profile-picture__badge",
+            "[data-frame*='open-to-work']",
+            "[data-testid*='open-to-work']"
+        ]
+        for sel in photo_badge_locators:
+            try:
+                if page.locator(sel).count() > 0:
+                    return True, f"photo_badge ({sel})"
+            except Exception:
+                pass
+
+        # 2. Check Open to Work card/section in DOM
+        card_locators = [
+            ".pv-open-to-carousel",
+            ".pv-open-to-card",
+            "section[data-view-name*='open-to-work']",
+            "div:has-text('Open to work')",
+            "div:has-text('Buscando empleo')"
+        ]
+        for sel in card_locators:
+            try:
+                loc = page.locator(sel)
+                if loc.count() > 0 and loc.first.is_visible():
+                    return True, f"profile_card ({sel})"
+            except Exception:
+                pass
+                
+        # 3. Check headline / top-card text for OpenToWork tags
+        try:
+            headline = page.locator(".text-body-medium").first.inner_text().lower()
+            if any(sig in headline for sig in ["#opentowork", "open to work", "buscando empleo", "open to opportunities", "seeking", "looking for", "disponible"]):
+                return True, "headline_signal"
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"[Debug] OpenToWork detection error: {e}")
+        
+    return False, ""
+
 def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict) -> dict:
     """
     Scrapes a LinkedIn profile using a persistent Chrome user context.
@@ -165,6 +220,8 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
         "experience": "",
         "skills": "",
         "raw_text": "",
+        "open_to_work_detected": False,
+        "open_to_work_source": "",
         "status": "error",
         "error_message": ""
     }
@@ -204,7 +261,14 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
                 context.close()
                 return profile_data
                 
-            # --- PHASE 1: HEADER EXTRACTION & QUICK COUNTRY FILTERING ---
+            # --- PHASE 1: HEADER EXTRACTION, OPEN TO WORK CHECK & QUICK COUNTRY FILTERING ---
+            # Detect Open to Work badge / frame / card in DOM
+            is_otw, otw_src = detect_open_to_work_in_page(page)
+            profile_data["open_to_work_detected"] = is_otw
+            profile_data["open_to_work_source"] = otw_src
+            if is_otw:
+                print(f"[OpenToWork] Verified active search status for candidate ({otw_src}).")
+                
             # Extract Name (usually first h1 element)
             try:
                 name_locator = page.locator("h1").first

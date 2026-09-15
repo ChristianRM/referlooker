@@ -21,7 +21,10 @@ def evaluate_candidate(profile_data: dict, vacancy_text: str, config: dict) -> d
     Analyzes the LinkedIn profile and the job description using Ollama
     to calculate structured sub-scores and enforce strict Open to Work filtering.
     """
-    # 1. Python-based quick check for active search signals
+    # 1. Quick check for active search signals (either DOM/badge detected during scraping OR text signals)
+    is_otw_detected = profile_data.get("open_to_work_detected", False)
+    otw_source = profile_data.get("open_to_work_source", "")
+    
     text_to_check = " ".join([
         profile_data.get("headline", "") or "",
         profile_data.get("about", "") or "",
@@ -40,12 +43,22 @@ def evaluate_candidate(profile_data: dict, vacancy_text: str, config: dict) -> d
         "busqueda activa",
         "nuevos retos",
         "opentowork",
+        "#opentowork",
         "new challenges",
         "new opportunities",
-        "open to new"
+        "open to new",
+        "in search of",
+        "busco empleo",
+        "activa en búsqueda",
+        "activo en búsqueda",
+        "abierto a escuchar",
+        "abierta a escuchar",
+        "abierto a oportunidades",
+        "abierta a oportunidades"
     ]
     
-    has_active_signal = any(sig in text_to_check for sig in signals)
+    has_text_signal = any(sig in text_to_check for sig in signals)
+    has_active_signal = is_otw_detected or has_text_signal
     
     if not has_active_signal:
         return {
@@ -54,7 +67,7 @@ def evaluate_candidate(profile_data: dict, vacancy_text: str, config: dict) -> d
             "auxiliary_score": 0,
             "match_score": 0,
             "open_to_work": False,
-            "evaluation_summary": "Candidate discarded: No active job search indicators (Open to Work, looking for, seeking, etc.) found in the profile headline, about, or experience text."
+            "evaluation_summary": "Candidate discarded: No active job search indicators (Open to Work badge/card or keywords in profile text) found."
         }
         
     # 2. Proceed to LLM evaluation if a signal is found
@@ -69,6 +82,7 @@ def evaluate_candidate(profile_data: dict, vacancy_text: str, config: dict) -> d
 URL: {profile_data.get('url')}
 Name: {profile_data.get('name')}
 Headline: {profile_data.get('headline')}
+Open to Work Status: {'Active (Confirmed via LinkedIn Badge/Card - ' + otw_source + ')' if is_otw_detected else 'Active (Detected in profile text)'}
 """
     
     if profile_data.get('about') or profile_data.get('experience'):
@@ -104,10 +118,9 @@ Strictly return a valid JSON object (and NOTHING else) in the following format:
 
 Instructions & Rules:
 1. **Open to Work Verification**:
-   Verify if the candidate is open to new opportunities or actively looking for work. Check the profile for explicit indicators (such as 'open to work', 'open to opportunities', 'seeking', 'looking for', 'disponible', 'disponibilidad', 'new challenges', etc.).
-   * If the profile contains such indicators, set "open_to_work" to true.
-   * If there are no active search indicators, set "open_to_work" to false.
-   * If "open_to_work" is false, set all scores (technical_score, experience_score, auxiliary_score, match_score) strictly to 0, and state in the "evaluation_summary" that the candidate is discarded because they are not looking for new opportunities.
+   The candidate has already been pre-verified as actively seeking new opportunities (Open to Work).
+   * Confirm "open_to_work" as true.
+   * If there is an explicit contradiction indicating they are strictly NOT looking, set "open_to_work" to false.
 
 2. **Scoring Rubric (Only if open_to_work is true)**:
    * **technical_score** (0-40): Fit for core programming languages, tools, libraries, and frameworks in the job description.
