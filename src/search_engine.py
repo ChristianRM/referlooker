@@ -90,25 +90,25 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict,
             # Detect if Google threw a CAPTCHA (redirected to google.com/sorry)
             if "google.com/sorry" in page.url:
                 print("\n" + "!" * 50)
-                print("[Action Required] Google is requesting a human verification (CAPTCHA).")
-                print("Please resolve it in the browser window that just opened.")
-                print("The script will wait for you to complete it before continuing automatically...")
+                print("[Action Required] Google is requesting human verification (CAPTCHA).")
+                print("Tip: To run 100% automated searches without CAPTCHA, activate Google Custom Search API in Google Cloud or configure SERPAPI_KEY in your .env.")
+                print("If a browser window is visible, please complete the CAPTCHA now (waiting 15 seconds)...")
                 print("!" * 50 + "\n")
                 
-                # Wait up to 2 minutes for the user to solve the CAPTCHA
+                # Wait up to 15 seconds for user to solve CAPTCHA if headful
                 try:
-                    for _ in range(120):
+                    for _ in range(15):
                         page.wait_for_timeout(1000)
                         if "google.com/sorry" not in page.url:
                             print("[Success] CAPTCHA resolved. Waiting for search results to load...")
-                            page.wait_for_timeout(3000)
+                            page.wait_for_timeout(2000)
                             break
                 except Exception:
                     pass
             
-            # Polling loop: Wait up to 15 seconds for search results to render and extract links
+            # Polling loop: Wait up to 10 seconds for search results to render and extract links
             extracted = []
-            for attempt in range(15):
+            for attempt in range(10):
                 try:
                     # If still stuck on sorry page, continue waiting
                     if "google.com/sorry" in page.url:
@@ -188,29 +188,121 @@ def load_dotenv(dotenv_path=".env"):
 # Load environment variables on module import
 load_dotenv()
 
+def extract_concise_keywords(query: str, target_country: str = "Any") -> str:
+    """Extracts concise, high-relevance natural search keywords from complex boolean X-Ray query."""
+    # 1. Strip OpenToWork & boilerplate terms
+    q = re.sub(r'\("?open to work"?.*?\)', '', query, flags=re.IGNORECASE)
+    q = re.sub(r'site:linkedin\.com/in/?', '', q, flags=re.IGNORECASE)
+    
+    # 2. Extract parenthesized groups
+    groups = re.findall(r'\(([^)]+)\)', q)
+    terms = []
+    
+    for g in groups:
+        items = re.findall(r'"([^"]+)"', g) or [i.strip() for i in g.split("OR")]
+        clean_items = [i.strip() for i in items if i.strip() and i.strip().lower() not in {"open to work", "opentowork", "#opentowork", "seeking", "looking for", "disponible", "open to opportunities"}]
+        if clean_items:
+            # Pick ONLY the first item from this group to avoid competing role titles
+            terms.append(clean_items[0])
+            
+    if not terms:
+        quoted = re.findall(r'"([^"]+)"', q)
+        terms = quoted[:2] if quoted else q.split()[:3]
+        
+    # Build clean keyword string
+    clean_terms = []
+    for t in terms:
+        t_clean = re.sub(r'["\']', '', t).strip()
+        if t_clean and t_clean.lower() not in ("mexico", "méxico", "spain", "españa", "colombia", "argentina", "latam", "remote"):
+            clean_terms.append(t_clean)
+            
+    result = " ".join(clean_terms[:3])
+    
+    if target_country and target_country not in ("Any", "Remote", "") and target_country.lower() not in result.lower():
+        result += f" {target_country}"
+        
+    return result.strip()
+
+def search_candidates_via_linkedin_direct(query: str, max_results: int = 5, start_offset: int = 0) -> list:
+    """
+    Directly queries LinkedIn search using saved authenticated cookies.
+    Highly reliable, fast, zero API keys required, and never blocked by Google CAPTCHA.
+    """
+    cookies_path = "cookies.json"
+    if not os.path.exists(cookies_path):
+        return []
+        
+    extracted = []
+    page_num = (start_offset // max(1, max_results)) + 1
+    clean_kw = extract_concise_keywords(query)
+    if not clean_kw:
+        clean_kw = query.replace('site:linkedin.com/in/', '').replace('site:linkedin.com/in', '').strip()
+    
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                storage_state=cookies_path,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+            page = context.new_page()
+            encoded = urllib.parse.quote(clean_kw)
+            url = f"https://www.linkedin.com/search/results/people/?keywords={encoded}&origin=GLOBAL_SEARCH_HEADER"
+            if page_num > 1:
+                url += f"&page={page_num}"
+                
+            print(f"[Direct LinkedIn] Sourcing candidates via LinkedIn People Search ({clean_kw}): {url}")
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(2500)
+            
+            links = page.eval_on_selector_all("a", "els => els.map(e => e.href)")
+            for l in links:
+                cleaned = clean_linkedin_url(l)
+                if cleaned and cleaned not in extracted:
+                    extracted.append(cleaned)
+                    if len(extracted) >= max_results:
+                        break
+                        
+            browser.close()
+            print(f"[Direct LinkedIn] Found {len(extracted)} candidate profiles.")
+    except Exception as e:
+        print(f"[Direct LinkedIn Error] {e}")
+        
+    return extracted
+
 def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
     """
-    Executes search query on Google via Google Custom Search or SerpAPI.
+    Executes search query on Google via Google Custom Search, SerpAPI, or Direct LinkedIn Search.
     Returns a list of unique LinkedIn profile URLs.
     """
     engine_config = config.get("search_engine", {})
-    engine = engine_config.get("engine", "google_cse")
+    engine = engine_config.get("engine", "auto")
     max_results = config.get("search_limits", {}).get("max_results_per_vacancy", 5)
     
     urls = []
     
     print(f"Starting search using engine '{engine}' with query: {query} (offset: {start_offset})")
     
+    # 1. Check if direct LinkedIn search with session cookies is available (preferred & most reliable)
+    if os.path.exists("cookies.json") and engine in ("auto", "linkedin_direct", "google_cse", "google_playwright"):
+        direct_urls = search_candidates_via_linkedin_direct(query, max_results=max_results, start_offset=start_offset)
+        if direct_urls:
+            return list(dict.fromkeys(direct_urls))
+            
     if engine in ("google_playwright", "direct"):
         return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
         
-    if engine == "google_cse":
+    if engine in ("google_cse", "auto"):
         # Prioritize environment variables (from .env file)
         api_key = os.getenv("GOOGLE_API_KEY") or engine_config.get("google_api_key", "")
         cx = os.getenv("GOOGLE_CX") or engine_config.get("google_cx", "")
         
         if not api_key or not cx or api_key in ("YOUR_GOOGLE_API_KEY", "Ver archivo .env", "") or cx in ("YOUR_GOOGLE_CSE_ID", "Ver archivo .env", ""):
             print("[Warning] Google Custom Search API Key or CX ID not configured. Set them in your '.env' file.")
+            if os.path.exists("cookies.json"):
+                direct_urls = search_candidates_via_linkedin_direct(query, max_results=max_results, start_offset=start_offset)
+                if direct_urls:
+                    return list(dict.fromkeys(direct_urls))
             print("[Warning] Activating Playwright fallback search...")
             return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
             
@@ -254,6 +346,10 @@ def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
                 print(f"[Error] Search with Google CSE endpoint '{url}' failed: {e}")
                 
         if not cse_success and not urls:
+            if os.path.exists("cookies.json"):
+                direct_urls = search_candidates_via_linkedin_direct(query, max_results=max_results, start_offset=start_offset)
+                if direct_urls:
+                    return list(dict.fromkeys(direct_urls))
             print("[Warning] Google CSE was unsuccessful. Activating direct Playwright fallback search...")
             return list(dict.fromkeys(search_candidates_via_playwright(query, max_results, config, start_offset)))
             
@@ -263,6 +359,10 @@ def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
         
         if not api_key or api_key in ("YOUR_SERPAPI_KEY", "Ver archivo .env", ""):
             print("[Warning] SerpAPI Key not configured. Set it in your '.env' file.")
+            if os.path.exists("cookies.json"):
+                direct_urls = search_candidates_via_linkedin_direct(query, max_results=max_results, start_offset=start_offset)
+                if direct_urls:
+                    return list(dict.fromkeys(direct_urls))
             return []
             
         url = "https://serpapi.com/search"
@@ -287,9 +387,17 @@ def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
                     urls.append(cleaned)
         except Exception as e:
             print(f"[Error] Search with SerpAPI failed: {e}")
+            if os.path.exists("cookies.json"):
+                direct_urls = search_candidates_via_linkedin_direct(query, max_results=max_results, start_offset=start_offset)
+                if direct_urls:
+                    return list(dict.fromkeys(direct_urls))
             
     else:
         print(f"[Error] Unrecognized search engine: {engine}")
+        if os.path.exists("cookies.json"):
+            direct_urls = search_candidates_via_linkedin_direct(query, max_results=max_results, start_offset=start_offset)
+            if direct_urls:
+                return list(dict.fromkeys(direct_urls))
         
     # Deduplicate while preserving original order
     unique_urls = list(dict.fromkeys(urls))

@@ -1,6 +1,5 @@
 import os
 import json
-import csv
 import time
 
 # ANSI color codes for styled console output
@@ -25,7 +24,27 @@ def print_header(title):
     print("=" * width)
 
 def load_candidates(json_path="output/candidates.json"):
-    """Loads candidates from candidates.json and groups them by vacancy."""
+    """Loads candidates from SQLite (or fallback candidates.json) and groups them by vacancy."""
+    db_path = os.path.join("output", "referlooker.db")
+    if os.path.exists(db_path):
+        try:
+            from database import get_candidates
+            all_cands = get_candidates(db_path=db_path)
+            if all_cands:
+                vacancies = {}
+                for cand in all_cands:
+                    vac_name = cand.get("vacancy", "Unassigned Vacancy")
+                    if vac_name not in vacancies:
+                        vacancies[vac_name] = {"desirable": [], "undesirable": []}
+                    score = int(cand.get("score", 0))
+                    if score >= 85:
+                        vacancies[vac_name]["desirable"].append(cand)
+                    else:
+                        vacancies[vac_name]["undesirable"].append(cand)
+                return vacancies
+        except Exception:
+            pass
+
     if not os.path.exists(json_path):
         return {}
 
@@ -47,7 +66,6 @@ def load_candidates(json_path="output/candidates.json"):
             vac_name = cand.get("vacancy", "Unassigned Vacancy")
             if vac_name not in vacancies:
                 vacancies[vac_name] = {"desirable": [], "undesirable": []}
-            # Ensure score is an integer
             try:
                 cand["score"] = int(cand.get("score", 0))
             except Exception:
@@ -58,6 +76,7 @@ def load_candidates(json_path="output/candidates.json"):
     add_to_group(undesirable_candidates, "undesirable")
 
     return vacancies
+
 
 def print_candidates_table(candidates):
     """Draws an ASCII table of the candidates and returns a mapped list of candidates."""
@@ -125,6 +144,13 @@ def view_candidate_detail(candidate):
     print(candidate.get("evaluation_summary", "No evaluation summary available."))
     print("-" * 70)
 
+    # Display Suggested Outreach Message
+    suggested_msg = candidate.get("suggested_message", "").strip()
+    if suggested_msg:
+        print(f"{BOLD}{GREEN}[AI Suggested Outreach Message]{RESET}")
+        print(f"{WHITE}{suggested_msg}{RESET}")
+        print("-" * 70)
+
     # Display profile sections
     print(f"{BOLD}{CYAN}[About / Summary]{RESET}")
     about = candidate.get("about", "").strip()
@@ -162,34 +188,6 @@ def view_candidate_detail(candidate):
     print("=" * 70)
     input(f"\nPress {BOLD}[Enter]{RESET} to return to the candidate list...")
 
-def export_vacancy_to_csv(vac_name, candidates):
-    """Exports the filtered candidates of a specific vacancy to a CSV file."""
-    # Sanitize the file name
-    safe_name = "".join(c for c in vac_name if c.isalnum() or c in (' ', '_', '-')).rstrip()
-    safe_name = safe_name.replace(" ", "_")
-    filename = f"output/{safe_name}_export.csv"
-
-    fieldnames = ["Name", "Score", "Open to Work", "LinkedIn URL", "Location", "Headline", "Evaluation Summary"]
-    
-    try:
-        with open(filename, "w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            for c in candidates:
-                writer.writerow({
-                    "Name": c.get("name", ""),
-                    "Score": f"{c.get('score', 0)}%",
-                    "Open to Work": "Yes" if c.get("open_to_work") else "No",
-                    "LinkedIn URL": c.get("linkedin_url", ""),
-                    "Location": c.get("location", ""),
-                    "Headline": c.get("headline", ""),
-                    "Evaluation Summary": c.get("evaluation_summary", "")
-                })
-        print(f"\n{GREEN}[Success] Report exported to: {os.path.abspath(filename)}{RESET}")
-        input(f"Press {BOLD}[Enter]{RESET} to continue...")
-    except Exception as e:
-        print(f"\n{RED}[Error] Could not export to CSV: {e}{RESET}")
-        input(f"Press {BOLD}[Enter]{RESET} to continue...")
 
 def filter_candidates_menu(all_candidates):
     """Secondary menu to apply filters to a list of candidates."""
@@ -279,7 +277,6 @@ def manage_vacancy_candidates(vac_name, data):
         print("2. View only Desirable candidates")
         print("3. View only Undesirable candidates")
         print("4. Apply Advanced Filters and Search")
-        print("5. Export this list to CSV")
         print("q. Go back to previous menu")
         
         opc = input(f"\nSelect an option: ").strip()
@@ -313,8 +310,6 @@ def manage_vacancy_candidates(vac_name, data):
                     view_candidate_detail(mapped[int(idx) - 1])
         elif opc == "4":
             current_list = filter_candidates_menu(all_cands)
-        elif opc == "5":
-            export_vacancy_to_csv(vac_name, current_list)
         elif opc.lower() == "q":
             break
 
@@ -327,7 +322,7 @@ def run_cli():
         vacancies = load_candidates()
         
         if not vacancies:
-            print(f"\n{YELLOW}No candidate records found in 'output/candidates.json'.{RESET}")
+            print(f"\n{YELLOW}No candidate records found in SQLite database.{RESET}")
             print("Make sure to process vacancies first to populate the database.")
             input(f"\nPress {BOLD}[Enter]{RESET} to return...")
             break

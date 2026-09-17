@@ -226,17 +226,25 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
         "error_message": ""
     }
     
+    cookies_path = "cookies.json"
     user_data_dir = os.path.abspath("linkedin_profile_context")
     
     with sync_playwright() as p:
         try:
-            # Launch Chromium with persistent context in headful or headless mode
-            context = p.chromium.launch_persistent_context(
-                user_data_dir,
-                headless=config.get("scraping", {}).get("headless", True),
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 720}
-            )
+            if os.path.exists(cookies_path):
+                browser = p.chromium.launch(headless=config.get("scraping", {}).get("headless", True))
+                context = browser.new_context(
+                    storage_state=cookies_path,
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    viewport={"width": 1280, "height": 720}
+                )
+            else:
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir,
+                    headless=config.get("scraping", {}).get("headless", True),
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    viewport={"width": 1280, "height": 720}
+                )
             page = context.pages[0] if context.pages else context.new_page()
             
             # Navigate to profile URL with a 30s timeout
@@ -528,42 +536,61 @@ def scrape_linkedin_profile(profile_url: str, target_country: str, config: dict)
             
     return profile_data
 
-def ensure_linkedin_session(config: dict):
+def ensure_linkedin_session(config: dict, interactive: bool = True):
     """
-    Verifies automatically whether a valid LinkedIn session exists in the persistent profile.
-    If it does not exist or has expired, opens a headful Chrome window for manual log in
-    and saves the credentials context directly.
+    Verifies automatically whether a valid LinkedIn session exists in cookies.json or the persistent profile.
+    If it does not exist or has expired, opens a login window only if interactive is True.
     """
+    cookies_path = "cookies.json"
     user_data_dir = os.path.abspath("linkedin_profile_context")
     session_valid = False
     
-    if os.path.exists(user_data_dir):
-        print("Checking if LinkedIn session is still active...")
+    # Check cookies.json first
+    if os.path.exists(cookies_path):
+        print("Checking if LinkedIn session from cookies.json is active...")
         with sync_playwright() as p:
             try:
-                # Run headless to verify silently in background
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir,
-                    headless=True,
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    storage_state=cookies_path,
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                 )
-                page = context.pages[0] if context.pages else context.new_page()
-                
-                # Navigate to the feed page which requires authentication
-                page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=25000)
-                page.wait_for_timeout(3000)
-                
+                page = context.new_page()
+                page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(2000)
                 body_text = page.locator("body").inner_text().lower()
                 if "linkedin.com/feed" in page.url and "join linkedin" not in body_text and "iniciar sesión" not in body_text:
                     session_valid = True
-                    print("[Session] Your LinkedIn session is ACTIVE and valid.")
-                else:
-                    print("[Session] LinkedIn session EXPIRED or invalid.")
+                    print("[Session] LinkedIn session in cookies.json is ACTIVE and valid.")
+                browser.close()
+            except Exception as e:
+                print(f"[Session] Error checking cookies.json: {e}")
+                
+    if not session_valid and os.path.exists(user_data_dir):
+        print("Checking if LinkedIn session in persistent profile is active...")
+        with sync_playwright() as p:
+            try:
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir,
+                    headless=True,
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                )
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(2000)
+                body_text = page.locator("body").inner_text().lower()
+                if "linkedin.com/feed" in page.url and "join linkedin" not in body_text and "iniciar sesión" not in body_text:
+                    session_valid = True
+                    print("[Session] Persistent LinkedIn profile session is ACTIVE.")
                 context.close()
             except Exception as e:
-                print(f"[Session] Error checking session: {e}")
+                print(f"[Session] Error checking persistent context: {e}")
                 
     if not session_valid:
+        if not interactive:
+            print("[Warning] No active LinkedIn session found in background mode. Continuing with available context...")
+            return False
+            
         print("\n" + "=" * 70)
         print("[LINKEDIN SESSION REQUIRED]")
         print("No active LinkedIn session found.")
@@ -572,14 +599,11 @@ def ensure_linkedin_session(config: dict):
         
         with sync_playwright() as p:
             try:
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir,
-                    headless=False,
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    viewport={"width": 1280, "height": 720}
+                browser = p.chromium.launch(headless=False)
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                 )
-                page = context.pages[0] if context.pages else context.new_page()
-                
+                page = context.new_page()
                 print("Navigating to LinkedIn login page...")
                 page.goto("https://www.linkedin.com/login")
                 
@@ -592,8 +616,11 @@ def ensure_linkedin_session(config: dict):
                 print("=" * 70 + "\n")
                 
                 input("Press ENTER when you are ready...")
-                
-                print(f"\n[Success] LinkedIn session started and saved persistently to {user_data_dir}")
-                context.close()
+                context.storage_state(path=cookies_path)
+                print(f"\n[Success] LinkedIn session saved to {cookies_path}")
+                browser.close()
+                return True
             except Exception as e:
                 print(f"[Error] Assisted authentication failed: {e}")
+                return False
+    return True

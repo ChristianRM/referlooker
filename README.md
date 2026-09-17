@@ -1,206 +1,209 @@
 # ReferLooker 🔍💼
+### AI-Powered Candidate Sourcing & Modern Web ATS Platform (v2.0.0)
 
-ReferLooker is an automated, unattended recruitment and candidate sourcing system for LinkedIn. It works in the background by processing vacancy descriptions in plain text (`.txt`), searching for active LinkedIn candidates (*Open to Work*) using Google *X-Ray* search techniques, and evaluating candidate profiles against job requirements using a local Large Language Model (LLM) via **Ollama** (leveraging local GPU acceleration, e.g., RTX 5070, for fast inference).
+ReferLooker is an automated, unattended recruitment and candidate sourcing platform for LinkedIn. It streamlines talent acquisition by combining **Google X-Ray Boolean search techniques**, **Playwright session-based profile extraction**, and **Local Large Language Model (LLM) screening via Ollama** (with GPU acceleration on local hardware) — all unified within a modern, responsive Glassmorphism Web ATS and interactive Kanban pipeline.
 
-Candidates are processed and stored directly in a structured JSON database, ready to be navigated and filtered using the interactive Candidate Browser CLI. This allows recruiters to immediately review candidates, connect with them on LinkedIn, and submit them to their company's referral program.
+---
+
+## 🌟 Key Highlights & Core Capabilities
+
+*   🎯 **Job Requisitions Hub**: Manage multiple concurrent job requisitions with priority starring, status tracking (Active / Archived), and real-time metric counters.
+*   🤖 **AI Sourcing Copilot Studio**: Conversational LLM assistant that analyzes Job Descriptions (JDs) and generates precision Google X-Ray queries with Boolean operators (`site:linkedin.com/in/`), seniority filtering, and geographic targeting.
+*   ⚖️ **Multi-Dimensional AI Evaluation Engine**:
+    *   **Scoring Breakdown**: Technical Stack (40%), Relevant Experience (40%), and Auxiliary Tools / Cloud (20%).
+    *   **Open to Work (OTW) Badging**: Identifies actively looking talent without penalizing passive top candidates.
+    *   **Automated Summaries**: Actionable bullet points highlighting strengths, match rationale, and potential gaps.
+*   📊 **Strict Partitioning Pipeline & Kanban Board**:
+    *   **Active Kanban Board & Table**: Strictly displays viable candidates ($\ge 60\%$ score, compatible location, active status).
+    *   **Unsuitable / Discarded Profiles Accordion**: Houses filtered profiles ($<60\%$, location mismatch, or manually discarded) in a collapsible, scrollable sub-table.
+    *   **Zero Duplication Guarantee**: Mathematically disjoint sets — candidates reside in strictly one view.
+    *   **Single-Click Restoration**: `Move to Pipeline` instantly reclassifies and promotes a discarded candidate into the active board.
+*   💡 **AI Discard Trend Insights**: Proactively detects patterns across discarded profiles (e.g. *96% geographic mismatch* or *missing core framework*) and provides one-click Copilot query suggestions to calibrate sourcing.
+*   🔄 **Batch Re-evaluation Engine**: Re-score existing candidate pools when requirements change with live progress spinners and toast notifications.
+*   💬 **Personalized Outreach Generator**: Instantly drafts tailored LinkedIn connection messages citing candidate experience and role highlights.
+*   📥 **Manual Candidate Ingestion**: Add external referrals or pasted resumes for immediate AI parsing, evaluation, and pipeline placement.
+*   🗄️ **Transactional SQLite Storage**: Complete local persistence in `output/candidates.db` with automated migrations and URL deduplication.
 
 ---
 
 ## 🏗️ Architecture & Sourcing Workflow
 
-The system executes in a modular, 5-stage automated pipeline:
-
 ```mermaid
 graph TD
-    A[Job Descriptions .txt in vacancies/] -->|Read vacancy requirements| B(Local Ollama: Generate X-Ray Query)
-    B -->|Search with geographic subdomains| C{Search Engine: Google CSE / SerpAPI or Playwright Fallback}
-    C -->|Retrieve LinkedIn /in/ profile URLs| D(Playwright: Extract Profile)
-    D -->|Visit profile with session cookies| E{Phase 1: Geographic Location Check}
-    E -->|Location matches requirement| F{Phase 2: Save to PDF & Parse}
-    F -->|Success| H(Local Ollama: Candidate Evaluation)
-    F -->|Fail Fallback| F_FB[HTML Scrolling & Direct Subpage Scraping]
-    F_FB --> H
-    E -->|Location mismatch| G[Auto-Discard - Score 0%]
-    H -->|Analyze skills, experience, and OpenToWork| I{Score >= 85%}
-    I -->|Yes| J[candidates.json Database]
-    I -->|No| K[undesirable_candidates in candidates.json]
-    J --> L[Interactive CLI Browser: Filter & Navigate]
+    A[Job Requisition / Description] -->|Analyze requirements| B(AI Sourcing Copilot: Ollama LLM)
+    B -->|Generate Google X-Ray Query| C{Search Engine: Google CSE / SerpAPI / Playwright Fallback}
+    C -->|Extract LinkedIn /in/ URLs| D(Deduplication Check: processed_urls)
+    D -->|New Profile| E(Playwright: LinkedIn Session Scraper)
+    E -->|Phase 1: Location Check| F{Location Compatible?}
+    F -->|No| G[Auto-Discard - Location Mismatch]
+    F -->|Yes| H{Phase 2: PDF Export & HTML Extraction}
+    H -->|Extract Profile Text| I(Local LLM: Multi-Criteria Candidate Evaluator)
+    I -->|Calculate Score 0-100%| J{Match Score >= 60%?}
+    J -->|Yes: Viable| K[Kanban Pipeline / Active Table]
+    J -->|No: Discarded| L[Unsuitable / Discarded Profiles Accordion]
+    K & L --> M[(SQLite Database: output/candidates.db)]
+    L -->|One-Click Restore| K
 ```
 
-### Folder Structure
+---
 
-*   **`src/`**: Contains the system's modular source code.
-    *   [`main.py`](file:///d:/Documents/Automations/ReferLooker/src/main.py): Main orchestrator and CLI menu interface.
-    *   [`cli.py`](file:///d:/Documents/Automations/ReferLooker/src/cli.py): Interactive console CLI browser for candidate records, advanced filters, and exports.
-    *   [`linkedin_scraper.py`](file:///d:/Documents/Automations/ReferLooker/src/linkedin_scraper.py): Playwright-based scraper for extracting public profile details.
-    *   [`evaluator.py`](file:///d:/Documents/Automations/ReferLooker/src/evaluator.py): LLM evaluator client connecting to Ollama.
-    *   [`query_generator.py`](file:///d:/Documents/Automations/ReferLooker/src/query_generator.py): Extracts requirements and compiles/refines Google X-Ray search query strings.
-    *   [`search_engine.py`](file:///d:/Documents/Automations/ReferLooker/src/search_engine.py): Executes searches via Google Custom Search Engine, SerpAPI, or direct Playwright.
-    *   [`save_cookies.py`](file:///d:/Documents/Automations/ReferLooker/src/save_cookies.py): Utility script to capture and persist LinkedIn session cookies.
-*   **`vacancies/`**: Input folder. Place job description `.txt` files here.
-*   **`processed/archived_vacancies/`**: History directory. Vacancy files are moved here once fully processed.
-*   **`output/`**: Output directory containing candidate database and logs:
-    *   `candidates.json`: Structured database containing details of all candidates evaluated (desirable and undesirable). This is the single source of truth for all candidate records.
-    *   `processed_urls.json`: History log of scraped profile URLs to avoid double-processing and API waste.
-    *   `referral_bot.log`: Log file mapping all system terminal events.
-    *   `pdfs/`: Folder containing downloaded LinkedIn PDF profiles of candidates for parser reference.
+## 📁 Repository Structure
+
+```text
+ReferLooker/
+├── src/
+│   ├── dashboard.py          # Flask Web ATS backend & REST API endpoints
+│   ├── database.py           # SQLite database schema, CRUD queries, & migrations
+│   ├── evaluator.py          # LLM evaluation engine & outreach message generator
+│   ├── query_generator.py    # AI Copilot studio & Boolean X-Ray query generator
+│   ├── linkedin_scraper.py   # Playwright scraper (PDF export & HTML fallback)
+│   ├── search_engine.py      # Google CSE, SerpAPI, and Playwright search backends
+│   ├── main.py               # CLI menu orchestrator
+│   ├── cli.py                # Interactive terminal candidate browser
+│   ├── save_cookies.py       # LinkedIn session recorder & cookie persister
+│   └── templates/
+│       └── index.html        # Modern Glassmorphism Web ATS Single Page Application
+├── tests/                    # Unit and integration test suite
+│   ├── test_copilot.py
+│   ├── test_manual_candidate.py
+│   └── test_live_sourcing_flow.py
+├── vacancies/                # Input folder for plain text Job Descriptions (.txt)
+├── processed/                # Archived vacancy descriptions
+├── output/                   # SQLite database (candidates.db), logs, and PDFs
+├── config.json               # System configuration (LLM models, limits, scraping)
+├── requirements.txt          # Python dependencies
+└── README.md                 # Project documentation
+```
 
 ---
 
 ## 🛠️ Prerequisites
 
-To run ReferLooker, ensure your system has:
-
-1.  **Python 3.10 or higher**
-2.  **Ollama** installed and running locally ([Download Ollama](https://ollama.com/)).
-    *   Pull the recommended model (defaults to `llama3.1:8b`, but you can customize it in configurations to models like `qwen2.5:14b` if running on a powerful local GPU like the RTX 5070):
-        ```bash
+1.  **Python 3.10+** (Python 3.11 recommended).
+2.  **Ollama** installed and running locally ([https://ollama.com](https://ollama.com)).
+    *   Pull the default model (e.g. `llama3.1:8b` or `qwen2.5:14b`):
+        ```powershell
         ollama pull llama3.1:8b
         ```
-3.  **Google Chrome** or Chromium (Playwright will download required binaries during installation).
+3.  **Chromium Browser** (installed automatically via Playwright).
 
 ---
 
-## 🚀 Installation & Configuration
+## 🚀 Installation & Setup
 
-### Step 1: Install Dependencies
-
-Open a terminal in the project root directory and run:
-
+### 1. Install Dependencies
 ```powershell
-# Install python requirements
+# Install required Python packages
 pip install -r requirements.txt
 
 # Install Playwright browser contexts
 playwright install chromium
 ```
 
-### Step 2: Configure Environment Variables
+### 2. Environment Configuration (`.env`)
+Create a `.env` file in the root directory (copy from `.env.template`):
+```powershell
+copy .env.template .env
+```
 
-1.  Copy the template file `.env.template` and rename it to `.env`:
-    ```powershell
-    copy .env.template .env
+Configure your search credentials in `.env`:
+*   **Google Custom Search API (Recommended)**:
+    ```env
+    GOOGLE_API_KEY="your_google_api_key"
+    GOOGLE_CX="your_custom_search_cx"
     ```
-2.  Open `.env` and fill in your keys. The search engine supports two API providers:
-    *   **Option A (Google Custom Search API - Recommended)**:
-        *   Obtain a Custom Search API Key from the Google Developer Console.
-        *   Create a programmable search engine (CSE) at Google Programmable Search, get the `CX` identifier, and set it to search the web with custom dorks.
-        *   Fill in `GOOGLE_API_KEY` and `GOOGLE_CX`.
-    *   **Option B (SerpAPI)**:
-        *   Register at SerpAPI, retrieve your private API key, and set `SERPAPI_KEY`.
-
+*   **SerpAPI (Alternative)**:
+    ```env
+    SERPAPI_KEY="your_serpapi_key"
+    ```
 > [!NOTE]
-> If no search keys are configured, ReferLooker automatically defaults to a **resilient Playwright fallback search**. It will open Google Search in a headful browser. If a CAPTCHA appears, it pauses the script and waits for you to solve it manually before proceeding.
+> If API keys are omitted, ReferLooker defaults to a resilient **Playwright headful search fallback** that opens Google Search in a browser and pauses if a CAPTCHA appears.
 
-### Step 3: Configure Settings (`config.json`)
+### 3. Application Settings (`config.json`)
+```json
+{
+  "ollama": {
+    "host": "http://localhost:11434",
+    "model": "llama3.1:8b"
+  },
+  "search_limits": {
+    "max_results_per_vacancy": 10
+  },
+  "evaluation": {
+    "min_score": 60
+  },
+  "scraping": {
+    "headless": true
+  }
+}
+```
 
-Adjust the project settings in `config.json`:
-*   `ollama.model`: The LLM model name loaded in Ollama (default: `llama3.1:8b`).
-*   `ollama.host`: Connection URL to Ollama (default: `http://localhost:11434`).
-*   `search_limits.max_results_per_vacancy`: Maximum profiles to scrape and evaluate per run.
-*   `evaluation.min_score`: Minimum compatibility score required to include a candidate in Excel reports (default: 80).
-*   `scraping.headless`: Set to `true` to run Playwright invisibly in the background. Set to `false` for debugging scraper steps.
-
-### Step 4: Login to LinkedIn (Save Session Cookies)
-
-To bypass LinkedIn sign-in walls, the scraper uses a persistent browser profile.
-
-1.  Execute the session recorder:
-    ```powershell
-    python src/save_cookies.py
-    ```
-2.  A Chromium browser will open. **Log in manually to your LinkedIn account**.
-3.  Resolve any verification checks (MFA or CAPTCHAs) if prompted.
-4.  Once you reach your LinkedIn home feed, go back to the terminal and press **ENTER**.
-5.  The script will save the authorization state in `cookies.json` and initialize `linkedin_profile_context`. You can then close the browser window.
+### 4. Authenticate with LinkedIn (Session Cookies)
+To access profile details, save your authenticated LinkedIn session:
+```powershell
+python src/save_cookies.py
+```
+1. A Chromium browser window will open. Log into your LinkedIn account.
+2. Complete any MFA or security verification.
+3. Once on your LinkedIn feed, return to the terminal and press **ENTER**.
+4. Cookies are persisted to `cookies.json` and `linkedin_profile_context`.
 
 ---
 
-## 📖 Operation Manual
+## 💻 Running ReferLooker
 
-Start the main orchestrator program:
+### Option A: Modern Web ATS & Dashboard (Recommended)
+Start the web platform:
+```powershell
+python src/dashboard.py
+```
+Open your browser and navigate to:
+```text
+http://127.0.0.1:5000
+```
 
+#### Web ATS Capabilities:
+1. **Requisitions Hub**: Create, edit, star, archive, or delete job requisitions.
+2. **AI Copilot Modal**: Click **"Run AI Sourcing"** on any job to interact with the LLM, refine the Boolean search string, and launch automated searches.
+3. **Interactive Kanban Pipeline**: Drag or switch candidate stages across *To Contact*, *Contacted*, *In Discussion*, and *Hired*.
+4. **Discarded Accordion**: Expand the *Unsuitable / Discarded Profiles* section at the bottom to audit non-qualifying profiles or click **"Move to Pipeline"** to rescue candidates.
+5. **AI Discard Trends**: View proactive insight chips alerting to location mismatches or skill trends.
+6. **Outreach & Modal Details**: Click **"Message"** on any candidate card to generate a personalized outreach message and copy it with one click.
+7. **Manual Candidate Addition**: Click **"+ Add Candidate"** to paste a resume or LinkedIn profile URL for instant scoring.
+
+---
+
+### Option B: Interactive Terminal CLI
+For terminal-first workflows:
 ```powershell
 python src/main.py
 ```
 
-This starts the interactive **Main Menu** in your terminal:
-
-```text
-============================================================
-                 REFERLOOKER - MAIN MENU
-============================================================
-1. Process open vacancies (folder 'vacancies/')
-2. Resume search for processed vacancies (folder 'processed/archived_vacancies/')
-3. Browse and filter candidates (interactive CLI)
-q. Quit
-============================================================
-```
-
-### Option 1: Process open vacancies
-1.  Drop vacancy descriptions as `.txt` files in the `vacancies/` folder (e.g., `vacancies/devops.txt`).
-2.  Select option `1`.
-3.  The pipeline will:
-    *   Analyze the vacancy with Ollama to extract the role and work country requirement.
-    *   Generate a targeted Google X-Ray search query (e.g., `site:mx.linkedin.com/in/ "open to work" ("DevOps" OR "SRE")`).
-    *   Find candidates using the search APIs (or headful Playwright fallback).
-    *   Scrape each profile using Playwright and your cookies.
-    *   **Immediate Location Filter**: Check the candidate's country. If it does not match the vacancy requirements, the candidate is discarded immediately (`Score: 0%`) to save resources.
-    *   **PDF Profile Extraction**: If the location matches, the scraper attempts to click the "More" button on the candidate's profile to download it natively as a PDF and parse it using `pypdf` to extract the full profile text cleanly.
-    *   **Fallback Scraping**: If PDF download fails, the scraper falls back to standard HTML scrolling, expanding text, and extracting details from specific profile subpages.
-    *   **LLM Screening**: Based on the extracted profile content, the system asks Ollama to generate a detailed match score, OpenToWork verification, and strengths/gaps summary in English.
-    *   **Database Storage**: All candidates are saved directly into the JSON candidate database: `output/candidates.json`.
-4.  Once a vacancy run finishes, the script lists candidates and prompts:
-    `Are you satisfied with the results obtained for vacancy '[title]'? (Y/N) [Y]:`
-    *   **Yes (Y)**: Moves the vacancy description file to `processed/archived_vacancies/` to archive it.
-    *   **No (N)**: Directs Ollama to **auto-refine the search query** with alternative terms and runs another search iteration (using automated pagination offsets to avoid duplicate profiles).
-
-### Option 2: Resume search for processed vacancies
-If you have previously archived vacancy descriptions in `processed/archived_vacancies/` but want to search for more candidates:
-1.  Select option `2`.
-2.  You will see a list of archived vacancies.
-3.  Select the corresponding index. The search query will run with a pagination offset matching the number of candidates already processed for that vacancy, finding new candidates.
-
-### Option 3: Browse and filter candidates (Interactive CLI Browser)
-Launches the console browser to explore candidate profiles:
-```text
-+-----+---------------------------+-------+------------+---------------------------------+
-|  #  |           Name            | Score | OpenToWork |            Location             |
-+-----+---------------------------+-------+------------+---------------------------------+
-|  1  | John Doe | Python Dev     |   94% |    Yes     | Mexico                          |
-|  2  | Mary Smith | Cloud Eng    |   88% |     No     | Monterrey, NL, Mexico           |
-+-----+---------------------------+-------+------------+---------------------------------+
-```
-Inside this interactive CLI, you can:
-*   Browse all processed candidates.
-*   **Filter** by vacancy, minimum score, Open to Work status, or keywords.
-*   Select a candidate's number to view their **full profile details, strengths, and LLM evaluation summary**.
-*   **Export** your filtered search results directly into a custom CSV spreadsheet report.
+*   **Option 1**: Process text files in `vacancies/`.
+*   **Option 2**: Resume searches for archived requisitions.
+*   **Option 3**: Interactive console browser with tabular views, keyword filtering, and CSV export.
 
 ---
 
-## 🔍 Technical Details
+## 🧪 Testing & Validation
 
-### Profile Extraction Strategy & Fallbacks
-The LinkedIn profile scraper ([`linkedin_scraper.py`](file:///d:/Documents/Automations/ReferLooker/src/linkedin_scraper.py)) employs a multi-tiered strategy to fetch complete profile details:
-
-1. **Primary: Native PDF Export & Parsing (Recommended)**
-   * Locates the profile's action menu by clicking the "More" (`Más` / `...`) button.
-   * Clicks "Save to PDF" (`Guardar como PDF` / `Guardar en PDF`) to download the profile.
-   * Saves the document under `output/pdfs/` and parses it using `pypdf` to cleanly extract *About*, *Experience*, and *Skills*. This avoids issues with dynamic class names and missing elements.
-
-2. **Fallback: Standard HTML Scraping & Self-Healing**
-   If PDF extraction fails or is unavailable:
-   * **Lazy Loading Scroll Loop**: Progressively scrolls down to trigger LinkedIn's asynchronous loading of sections.
-   * **Button Expansion**: Automatically clicks "see more" and "show more" buttons to reveal truncated text blocks.
-   * **Direct Subpage Extraction**: If HTML sections are missing, Playwright bypasses the main profile layout and navigates directly to LinkedIn detail subpages (e.g., `/details/experience/` and `/details/skills/`) to force text extraction.
-
-### Session Security & Protection
-*   The script verifies session status on startup. If LinkedIn requests verification, the script opens a headful window allowing you to log in.
-*   The system uses human-like delays and browser parameters to protect your account.
+Execute the automated test suite:
+```powershell
+python -m unittest discover tests
+```
 
 ---
 
-## 🪵 Diagnosis and Logs
+## 📋 Changelog (v2.0.0)
 
-Terminal outputs and error traces are written to [`output/referral_bot.log`](file:///d:/Documents/Automations/ReferLooker/output/referral_bot.log) via the `Tee` logger. If you notice unexpected behavior, check the log file for details.
+*   **Strict Pipeline Partitioning**: Resolved all candidate duplication by enforcing mutually disjoint queries between the Kanban board ($\ge 60\%$) and Discarded Accordion ($<60\%$).
+*   **Single-Click Candidate Restoration**: Added `/api/candidates/<id>/restore` endpoint to immediately promote discarded profiles to the active pipeline.
+*   **AI Discard Trend Insights**: Integrated statistical pattern detection for geographical and technical discard clusters.
+*   **Interactive Sourcing Copilot**: Added interactive chat modal with dynamic Boolean query generator and preset refinement chips.
+*   **Open to Work Informative Badging**: Updated evaluation criteria to reward Open to Work profiles with a visual badge without disqualifying passive talent.
+*   **Job Requisitions Hub**: Implemented priority starring, direct CRUD management, and live metric aggregation.
+
+---
+
+## 📄 License
+Internal Automation & Recruitment Tool. All rights reserved.

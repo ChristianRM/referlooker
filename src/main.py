@@ -2,16 +2,27 @@ import os
 import sys
 import json
 import shutil
+import time
 import pandas as pd
 
 # Add current directory to path just in case
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from query_generator import generate_search_query, generate_refined_search_query
+from query_generator import generate_search_query, generate_refined_search_query, chat_refine_search_query
 from search_engine import search_candidates
 from linkedin_scraper import scrape_linkedin_profile, ensure_linkedin_session
 from evaluator import evaluate_candidate
 from cli import run_cli
+from database import (
+    upsert_candidate,
+    init_db,
+    get_vacancies,
+    get_vacancy_by_id,
+    get_candidates,
+    update_vacancy,
+    get_processed_urls_from_db,
+    is_url_processed_in_db
+)
 
 class Tee:
     def __init__(self, filename, mode="a"):
@@ -38,125 +49,172 @@ def load_config():
         return json.load(f)
 
 def setup_directories():
-    """Creates the necessary directories if they do not exist."""
-    os.makedirs("vacancies", exist_ok=True)
-    os.makedirs("processed/archived_vacancies", exist_ok=True)
+    """Creates the necessary directories and initializes SQLite database."""
     os.makedirs("output", exist_ok=True)
-
-def load_processed_urls() -> dict:
-    """Loads the history of processed URLs to avoid duplicates."""
-    history_path = "output/processed_urls.json"
-    if os.path.exists(history_path):
-        try:
-            with open(history_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            print("[Warning] Could not read processed_urls.json. A new one will be created.")
-            return {}
-    return {}
-
-def save_processed_urls(processed_dict: dict):
-    """Saves the history of processed URLs."""
-    history_path = "output/processed_urls.json"
-    with open(history_path, "w", encoding="utf-8") as f:
-        json.dump(processed_dict, f, indent=2, ensure_ascii=False)
-
-# Excel and TXT report generation functions have been removed. Candidate information is managed solely via output/candidates.json database.
+    init_db()
 
 def update_json_report(candidate_info: dict):
     """
-    Adds or updates a candidate in the consolidated JSON database (output/candidates.json).
-    Classifies in 'desirable_candidates' if score is >= 85%, else in 'undesirable_candidates'.
+    Saves candidate in SQLite database (output/referlooker.db).
+    SQLite is the single source of truth.
     """
-    json_path = "output/candidates.json"
-    
-    # Initialize empty structure
-    report = {
-        "desirable_candidates": [],
-        "undesirable_candidates": []
-    }
-    
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-                if isinstance(loaded, dict):
-                    report["desirable_candidates"] = loaded.get("desirable_candidates", [])
-                    report["undesirable_candidates"] = loaded.get("undesirable_candidates", [])
-        except Exception:
-            pass
-            
-    url = candidate_info.get("linkedin_url")
-    
-    # Remove previous duplicates of the same candidate from both lists
-    report["desirable_candidates"] = [c for c in report["desirable_candidates"] if c.get("linkedin_url") != url]
-    report["undesirable_candidates"] = [c for c in report["undesirable_candidates"] if c.get("linkedin_url") != url]
-    
-    score = candidate_info.get("score", 0)
-    
-    # Save into the corresponding category list
-    if score >= 85:
-        report["desirable_candidates"].append(candidate_info)
-        print(f"[JSON Database] Candidate '{candidate_info.get('name')}' added to 'desirable_candidates' (Score: {score}%)")
+    try:
+        upsert_candidate(candidate_info)
+    except Exception as e:
+        print(f"[Database Error] Could not upsert candidate into SQLite: {e}")
+
+def process_vacancy(
+    vacancy_input,
+    config,
+    processed_history=None,
+    min_target=5,
+    interactive=True,
+    progress_callback=None,
+    cancel_check=None,
+    custom_query=None,
+    pause_check=None,
+    get_active_query=None,
+    on_candidate_evaluated=None,
+    on_candidate_discarded=None
+):
+    """
+    Main workflow for a specific vacancy.
+    Scrapes and evaluates profiles until reaching min_target newly evaluated candidates.
+    Supports progress callbacks, real-time match/discard notifications, in-flight pause, and query refinement.
+    """
+    def report_progress(msg: str, current_evals: int, is_done: bool = False):
+        if progress_callback:
+            try:
+                progress_callback(msg, current_evals, min_target, is_done)
+            except Exception:
+                pass
+
+    def wait_if_paused():
+        if not pause_check:
+            return
+        while pause_check():
+            if cancel_check and cancel_check():
+                return
+            time.sleep(0.4)
+
+    def check_query_update(current_q):
+        if get_active_query:
+            new_q = get_active_query()
+            if new_q and new_q.strip() and new_q.strip() != current_q:
+                print(f"\n[Query Updated In-Flight] Switching to new query: {new_q.strip()}")
+                return new_q.strip(), True
+        return current_q, False
+
+    if cancel_check and cancel_check():
+        report_progress("Sourcing cancelled by user.", 0, is_done=True)
+        return {"success": False, "cancelled": True, "evaluated": 0}
+
+    # Support dictionary (from SQLite vacancies table) or filepath (legacy)
+    if isinstance(vacancy_input, dict):
+        vac_id = vacancy_input.get("id")
+        vac_title = vacancy_input.get("title", "Untitled Vacancy")
+        vacancy_text = vacancy_input.get("description", "").strip()
+        target_country_configured = vacancy_input.get("target_country", "Any")
     else:
-        report["undesirable_candidates"].append(candidate_info)
-        print(f"[JSON Database] Candidate '{candidate_info.get('name')}' added to 'undesirable_candidates' (Score: {score}%)")
-        
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
+        # Fallback for file path
+        vac_file = vacancy_input
+        vac_title = os.path.basename(vac_file).replace(".txt", "")
+        vac_id = None
+        target_country_configured = "Any"
+        if os.path.exists(vac_file):
+            with open(vac_file, "r", encoding="utf-8") as f:
+                vacancy_text = f.read().strip()
+        else:
+            vacancy_text = ""
 
-
-def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_history: dict, min_target: int):
-    """Processes a single vacancy (query generation, search, scraping, evaluation)."""
-    vac_path = os.path.join(vac_folder, vac_file)
     print(f"\n" + "-" * 50)
-    print(f"Processing vacancy: {vac_file} from '{vac_folder}' (Target: {min_target} evaluated candidates)")
+    print(f"Processing vacancy: {vac_title} (Target: {min_target} evaluated candidates)")
     print("-" * 50)
+    report_progress(f"Starting analysis for position '{vac_title}'...", 0)
     
-    with open(vac_path, "r", encoding="utf-8") as f:
-        vacancy_text = f.read().strip()
-        
     if not vacancy_text:
-        print(f"[Warning] Vacancy file {vac_file} is empty. Skipping.")
-        return
+        print(f"[Warning] Vacancy description for '{vac_title}' is empty. Skipping.")
+        report_progress(f"Empty description. Sourcing finished.", 0, is_done=True)
+        return {"success": False, "error": "Empty vacancy description", "evaluated": 0}
         
-    # 1. Generate Google X-Ray search query with local LLM
-    print("Generating X-Ray search query with Ollama...")
-    analysis = generate_search_query(vacancy_text, config)
-    role = analysis.get("role", "Unknown")
-    query = analysis.get("search_query", "")
-    target_country = analysis.get("target_country", "Any")
-    
-    print(f"Role detected: {role}")
-    print(f"Target country for vacancy: {target_country}")
-    print(f"Generated query: {query}")
+    # 1. Generate or use custom Google X-Ray search query
+    if custom_query and custom_query.strip():
+        print("[Copilot] Using recruiter-refined custom X-Ray search query.")
+        report_progress("Using refined custom query from AI Copilot...", 0)
+        query = custom_query.strip()
+        target_country = target_country_configured or "Any"
+    else:
+        print("Generating X-Ray search query with Ollama...")
+        report_progress("Generating AI-optimized search query with Ollama...", 0)
+        analysis = generate_search_query(vacancy_text, config)
+        role = analysis.get("role", "Unknown")
+        query = analysis.get("search_query", "")
+        
+        # Use target country from database if specified, else from LLM analysis
+        if target_country_configured and target_country_configured not in ("Any", "Remote", ""):
+            target_country = target_country_configured
+        else:
+            target_country = analysis.get("target_country", "Any")
+        
+        print(f"Role detected: {role}")
+        print(f"Target country for vacancy: {target_country}")
+        
+    print(f"Active search query: {query}")
     
     if not query:
         print("[Error] Could not generate a valid search query. Skipping vacancy.")
-        return
+        report_progress("Error generating search query with AI.", 0, is_done=True)
+        return {"success": False, "error": "Could not generate search query", "evaluated": 0}
         
+    if processed_history is None:
+        processed_history = get_processed_urls_from_db()
+    elif isinstance(processed_history, dict):
+        processed_history = set(processed_history.keys())
+    elif not isinstance(processed_history, set):
+        processed_history = set(processed_history)
+
     satisfied = False
     refined_query = query
     evaluations_count = 0
     current_run_urls = set()
     
-    # Calculate starting offset based on historical records for this specific vacancy
-    start_offset = sum(1 for url, info in processed_history.items() if info.get("vacancy") == vac_file)
-    current_offset = start_offset
+    # Always start search from offset 0 (page 1) and filter duplicates via processed_history set
+    current_offset = 0
     
     while not satisfied:
+        wait_if_paused()
+        if cancel_check and cancel_check():
+            print("[Cancelled] Sourcing aborted by user.")
+            report_progress("Sourcing cancelled by user.", evaluations_count, is_done=True)
+            return {"success": False, "cancelled": True, "evaluated": evaluations_count}
+
+        # Check for in-flight query modification
+        refined_query, query_changed = check_query_update(refined_query)
+        if query_changed:
+            current_offset = 0
+            report_progress(f"Search query updated. Searching with new parameters...", evaluations_count)
+
         print(f"\n[Search] Executing query search starting at offset {current_offset}...")
+        report_progress(f"Searching candidate profiles (offset {current_offset})...", evaluations_count)
         candidate_urls = search_candidates(refined_query, config, start_offset=current_offset)
         
+        wait_if_paused()
+        if cancel_check and cancel_check():
+            print("[Cancelled] Sourcing aborted by user.")
+            report_progress("Sourcing cancelled by user.", evaluations_count, is_done=True)
+            return {"success": False, "cancelled": True, "evaluated": evaluations_count}
+
         if not candidate_urls:
             print(f"[Warning] No candidates returned by the search engine.")
             # If target not reached, auto-refine
             if evaluations_count < min_target:
                 print(f"[Info] Target not reached ({evaluations_count}/{min_target}). Auto-refining search query...")
+                report_progress("Auto-refining search query with AI to expand results...", evaluations_count)
                 new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
                 if new_refined and new_refined != refined_query:
                     print(f"\n--> Auto-refined search query: {new_refined}")
                     refined_query = new_refined
+                    current_offset = 0
                     continue
                 else:
                     print("[Warning] Could not auto-refine query further. Ending search run.")
@@ -168,31 +226,41 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
             
         # Verify that the LinkedIn session is active (assisting visibly if expired)
         if any(url not in processed_history for url in candidate_urls):
-            ensure_linkedin_session(config)
+            report_progress("Verifying LinkedIn session...", evaluations_count)
+            ensure_linkedin_session(config, interactive=interactive)
             
         # Scrape and evaluate candidates
         for url in candidate_urls:
-            if url in processed_history:
+            wait_if_paused()
+            if cancel_check and cancel_check():
+                print("[Cancelled] Sourcing aborted by user.")
+                report_progress("Sourcing cancelled by user.", evaluations_count, is_done=True)
+                return {"success": False, "cancelled": True, "evaluated": evaluations_count}
+
+            # Check if query changed mid-batch
+            refined_query, query_changed = check_query_update(refined_query)
+            if query_changed:
+                current_offset = 0
+                break
+
+            if url in processed_history or is_url_processed_in_db(url):
                 print(f"[Skipped] Candidate already processed: {url}")
                 continue
                 
+            report_progress(f"Scraping LinkedIn profile ({evaluations_count}/{min_target})...", evaluations_count)
             # Scrape profile (includes Phase 1 country check)
             profile = scrape_linkedin_profile(url, target_country, config)
             
-            # Register URL in history logs
-            processed_history[url] = {
-                "vacancy": vac_file,
-                "status": profile["status"],
-                "name": profile["name"],
-                "timestamp": pd.Timestamp.now().isoformat()
-            }
-            save_processed_urls(processed_history)
+            # Register in in-memory sets
+            processed_history.add(url)
             current_run_urls.add(url)
             
             # If discarded in Phase 1 due to location mismatch
             if profile["status"] == "location_mismatch":
+                cand_loc = profile.get("location") or "Not specified"
                 candidate_record = {
-                    "vacancy": vac_file,
+                    "vacancy_id": vac_id,
+                    "vacancy": vac_title,
                     "name": profile["name"] or "Unknown",
                     "headline": profile["headline"] or "No headline",
                     "technical_score": 0,
@@ -200,22 +268,36 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     "auxiliary_score": 0,
                     "score": 0,
                     "open_to_work": False,
-                    "evaluation_summary": f"Automatically discarded: location mismatch. (Candidate location: '{profile.get('location')}', Job requires: '{target_country}').",
+                    "status": "location_mismatch",
+                    "evaluation_summary": f"Automatically discarded: location mismatch. (Candidate location: '{cand_loc}', Job requires: '{target_country}').",
                     "linkedin_url": url,
-                    "location": profile.get("location") or "Not specified",
+                    "location": cand_loc,
                     "about": profile.get("about") or "",
                     "experience": profile.get("experience") or "",
                     "skills": profile.get("skills") or "",
                     "timestamp": pd.Timestamp.now().isoformat()
                 }
                 update_json_report(candidate_record)
+                if on_candidate_discarded:
+                    try:
+                        on_candidate_discarded({
+                            "name": profile["name"] or "LinkedIn Member",
+                            "headline": profile["headline"] or "Profile evaluated",
+                            "location": cand_loc,
+                            "linkedin_url": url,
+                            "type": "location_mismatch",
+                            "reason": f"Location mismatch: Candidate based in '{cand_loc}', required '{target_country}'."
+                        })
+                    except Exception as e:
+                        print(f"[Warning] Error in on_candidate_discarded callback: {e}")
                 continue
                 
             # If scraping error occurred
             if profile["status"] != "success":
                 print(f"[Scraper Error] Could not process {url}: {profile['error_message']}")
                 candidate_record = {
-                    "vacancy": vac_file,
+                    "vacancy_id": vac_id,
+                    "vacancy": vac_title,
                     "name": profile["name"] or "Unknown",
                     "headline": profile["headline"] or "No headline",
                     "technical_score": 0,
@@ -223,6 +305,7 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     "auxiliary_score": 0,
                     "score": 0,
                     "open_to_work": False,
+                    "status": "discarded",
                     "evaluation_summary": f"Scraping error: {profile['error_message']}",
                     "linkedin_url": url,
                     "location": profile.get("location") or "Not specified",
@@ -232,10 +315,24 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                     "timestamp": pd.Timestamp.now().isoformat()
                 }
                 update_json_report(candidate_record)
+                if on_candidate_discarded:
+                    try:
+                        on_candidate_discarded({
+                            "name": profile["name"] or "LinkedIn Member",
+                            "headline": profile["headline"] or "Profile evaluated",
+                            "location": profile.get("location") or "Not specified",
+                            "linkedin_url": url,
+                            "type": "error",
+                            "reason": f"Scraping issue: {profile.get('error_message') or 'Inaccessible profile'}"
+                        })
+                    except Exception as e:
+                        print(f"[Warning] Error in on_candidate_discarded callback: {e}")
                 continue
                 
             # Perform full profile evaluation with Ollama
-            print(f"Evaluating candidate profile '{profile['name']}' against job description...")
+            c_name = profile['name'] or 'Candidate'
+            report_progress(f"Evaluating profile of '{c_name}' with AI...", evaluations_count)
+            print(f"Evaluating candidate profile '{c_name}' against job description...")
             evaluation = evaluate_candidate(profile, vacancy_text, config)
             score = evaluation["match_score"]
             open_to_work = evaluation["open_to_work"]
@@ -243,9 +340,10 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
             
             print(f"--> Match Score: {score}% | OpenToWork: {open_to_work}")
             
-            # Save structured JSON candidate details
+            # Save candidate details
             candidate_record = {
-                "vacancy": vac_file,
+                "vacancy_id": vac_id,
+                "vacancy": vac_title,
                 "name": profile["name"] or "Unknown",
                 "headline": profile["headline"] or "No headline",
                 "technical_score": int(evaluation.get("technical_score", 0)),
@@ -253,6 +351,7 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
                 "auxiliary_score": int(evaluation.get("auxiliary_score", 0)),
                 "score": int(score),
                 "open_to_work": bool(open_to_work),
+                "status": "new",
                 "evaluation_summary": eval_summary,
                 "linkedin_url": url,
                 "location": profile.get("location") or "Not specified",
@@ -265,6 +364,12 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
             
             if profile["status"] == "success":
                 evaluations_count += 1
+                if on_candidate_evaluated:
+                    try:
+                        on_candidate_evaluated(candidate_record)
+                    except Exception as e:
+                        print(f"[Warning] Error in on_candidate_evaluated callback: {e}")
+                report_progress(f"Evaluated: {c_name} (Score: {score}%) [{evaluations_count}/{min_target}]", evaluations_count)
                 
             # Check target reached mid-page
             if evaluations_count >= min_target:
@@ -276,20 +381,26 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
             print(f"\n[Info] Evaluated {evaluations_count}/{min_target} candidates. Fetching next page of search results...")
             continue
             
-        # Show interactive summary of candidates processed for this vacancy
+        # Non-interactive mode (for Web Dashboard background task)
+        if not interactive:
+            report_progress(f"Sourcing completed successfully. Evaluated {evaluations_count} candidates.", evaluations_count, is_done=True)
+            return {
+                "success": True,
+                "evaluated": evaluations_count,
+                "target": min_target,
+                "candidates_processed": len(current_run_urls)
+            }
+
+        # Show interactive summary of candidates processed for this vacancy in CLI
         print(f"\n" + "=" * 60)
-        print(f"   CANDIDATE SUMMARY FOR VACANCY: {vac_file}")
+        print(f"   CANDIDATE SUMMARY FOR VACANCY: {vac_title}")
         print(f"=" * 60)
         
-        vacancy_candidates = []
-        if os.path.exists("output/candidates.json"):
-            try:
-                with open("output/candidates.json", "r", encoding="utf-8") as f:
-                    report = json.load(f)
-                    all_cands = report.get("desirable_candidates", []) + report.get("undesirable_candidates", [])
-                    vacancy_candidates = [c for c in all_cands if c.get("vacancy") == vac_file]
-            except Exception:
-                pass
+        try:
+            from database import get_candidates
+            vacancy_candidates = get_candidates(vacancy_id=vac_id, vacancy=vac_title)
+        except Exception:
+            vacancy_candidates = []
                 
         if vacancy_candidates:
             # Sort by score descending
@@ -305,44 +416,66 @@ def process_vacancy(vac_file: str, vac_folder: str, config: dict, processed_hist
             print("No candidates processed for this vacancy yet.")
         print("=" * 60)
         
-        satisfy_input = input(f"\nAre you satisfied with the results obtained for vacancy '{vac_file}'? (Y/N) [Y]: ").strip().lower()
+        satisfy_input = input(f"\nAre you satisfied with the results obtained for vacancy '{vac_title}'? (Y/N) [Y]: ").strip().lower()
         if satisfy_input in ("", "y", "yes"):
             satisfied = True
-            # Move to history if processed from the active vacancies folder
-            if vac_folder == "vacancies":
-                dest_path = os.path.join("processed/archived_vacancies", vac_file)
-                try:
-                    if os.path.exists(dest_path):
-                        os.remove(dest_path)
-                    shutil.move(vac_path, dest_path)
-                    print(f"Vacancy file archived to: {dest_path}")
-                except Exception as e:
-                    print(f"[Error] Could not archive vacancy file: {e}")
+            if vac_id:
+                update_vacancy(vac_id, status="archived")
+                print(f"[Database] Vacancy '{vac_title}' status updated to 'archived'.")
             else:
-                print(f"[Info] Keeping vacancy in archived history: {vac_path}")
+                print(f"[Info] Vacancy processing marked completed.")
         else:
-            refine_input = input("Would you like Ollama to auto-refine the search query to find more candidates? (Y/N) [Y]: ").strip().lower()
-            if refine_input in ("", "y", "yes"):
-                print("Requesting query refinement from Ollama...")
-                new_refined = generate_refined_search_query(vacancy_text, refined_query, config)
-                if new_refined:
-                    print(f"\n--> Ollama generated the following refined query:\n{new_refined}")
-                    use_refined = input("Would you like to execute the search with this refined query? (Y/N) [Y]: ").strip().lower()
-                    if use_refined in ("", "y", "yes"):
-                        refined_query = new_refined
-                        # Reset evaluations_count and offset for the new refined search loop
-                        evaluations_count = 0
-                        current_offset = 0
-                    else:
-                        print("[Info] Refined query discarded. Retrying with previous query.")
-                else:
-                    print("[Warning] Ollama could not generate a refined query. Retrying with previous query.")
-            else:
-                print(f"[Info] Leaving vacancy '{vac_file}' in '{vac_folder}' for future execution runs.")
-                break
+            print("\n" + "=" * 65)
+            print("       💬 RECRUITER AI SOURCING COPILOT (CHAT REFINEMENT)")
+            print("=" * 65)
+            print(f"Current query:\n{refined_query}\n")
+            print("Chat with the Copilot to tune seniority, skills, location, or boolean terms.")
+            print("Type your instruction (e.g. 'Focus on Senior profiles with strong AWS and Terraform experience')")
+            print("or press [Enter] to run the search with the current query, or 'q' to stop.\n")
+            
+            chat_history = []
+            while True:
+                user_prompt = input("Recruiter > ").strip()
+                if not user_prompt:
+                    # User accepted current query and wants to run search
+                    evaluations_count = 0
+                    current_offset = 0
+                    break
+                if user_prompt.lower() in ("q", "quit", "exit"):
+                    print(f"[Info] Leaving vacancy '{vac_title}' active in database.")
+                    satisfied = True
+                    break
+                
+                chat_history.append({"role": "user", "content": user_prompt})
+                print("\n[AI Copilot is analyzing and refining query...]")
+                copilot_res = chat_refine_search_query(
+                    history=chat_history,
+                    vacancy_text=vacancy_text,
+                    current_query=refined_query,
+                    target_country=target_country,
+                    config=config
+                )
+                reply = copilot_res.get("reply", "")
+                new_q = copilot_res.get("search_query", "")
+                chat_history.append({"role": "assistant", "content": reply})
+                
+                print(f"\n🤖 AI Copilot: {reply}")
+                if new_q and new_q != refined_query:
+                    refined_query = new_q
+                    print(f"\n🔍 Updated query:\n{refined_query}\n")
+                for tip in copilot_res.get("tips", []):
+                    print(f"💡 Tip: {tip}")
+                print("\nType another instruction to keep refining, or press [Enter] to launch the search:")
 
 def main():
     setup_directories()
+    
+    # Check if started with --dashboard or --web flag
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("--dashboard", "--web", "-w", "-d"):
+        from dashboard import start_dashboard
+        start_dashboard(open_browser=True)
+        return
+
     # Initialize Tee to log terminal outputs to file
     tee = Tee("output/referral_bot.log", mode="w")
     sys.stdout = tee
@@ -354,36 +487,39 @@ def main():
         print("\n" + "=" * 60)
         print("                 REFERLOOKER - MAIN MENU")
         print("=" * 60)
-        print("1. Process open vacancies (folder 'vacancies/')")
-        print("2. Resume search for processed vacancies (folder 'processed/archived_vacancies/')")
+        print("1. Process active vacancies (SQLite Database)")
+        print("2. Resume search for archived vacancies (SQLite Database)")
         print("3. Browse and filter candidates (interactive CLI)")
+        print("4. Launch Web Dashboard & Kanban ATS (http://localhost:5000)")
         print("q. Quit")
         print("=" * 60)
         
         opc = input("Select an option: ").strip()
         
         if opc == "1":
-            vacancy_files = [f for f in os.listdir("vacancies") if f.endswith(".txt")]
-            if not vacancy_files:
-                print("\nNo vacancy descriptions (.txt) found in the 'vacancies/' folder.")
-                print("Drop vacancy description files in the folder and try again.")
+            active_vacancies = get_vacancies(status="active")
+            if not active_vacancies:
+                print("\nNo active vacancies found in the SQLite database.")
+                print("You can create new vacancies from the Web Dashboard (http://localhost:5000).")
                 continue
                 
             print("\nSelect the vacancy you wish to process:")
-            print("1. [Process all vacancies]")
-            for idx, file in enumerate(vacancy_files, 2):
-                print(f"{idx}. {file}")
+            print("1. [Process all active vacancies]")
+            for idx, v in enumerate(active_vacancies, 2):
+                star_tag = "⭐ " if v.get("is_starred") else ""
+                country_info = f" (Target: {v.get('target_country')})" if v.get('target_country') and v.get('target_country') != 'Any' else ""
+                print(f"{idx}. {star_tag}{v['title']}{country_info} [ID #{v['id']}]")
             print("q. [Back to main menu]")
             
             sel = input("\nOption: ").strip()
             if sel.lower() == 'q':
                 continue
             elif sel == "1":
-                selected_files = vacancy_files
+                selected_vacancies = active_vacancies
             elif sel.isdigit():
                 sel_idx = int(sel)
-                if 2 <= sel_idx <= len(vacancy_files) + 1:
-                    selected_files = [vacancy_files[sel_idx - 2]]
+                if 2 <= sel_idx <= len(active_vacancies) + 1:
+                    selected_vacancies = [active_vacancies[sel_idx - 2]]
                 else:
                     print("Invalid option.")
                     continue
@@ -398,20 +534,21 @@ def main():
                 print("[Info] Invalid input. Defaulting to 5.")
                 min_target = 5
                 
-            print(f"\nStarting processing of {len(selected_files)} open vacancy(ies)...")
-            for vac_file in selected_files:
-                processed_history = load_processed_urls()
-                process_vacancy(vac_file, "vacancies", config, processed_history, min_target)
+            print(f"\nStarting processing of {len(selected_vacancies)} active vacancy(ies)...")
+            for vac in selected_vacancies:
+                processed_history = get_processed_urls_from_db()
+                process_vacancy(vac, config, processed_history, min_target)
                 
         elif opc == "2":
-            history_files = [f for f in os.listdir("processed/archived_vacancies") if f.endswith(".txt")]
-            if not history_files:
-                print("\nNo archived vacancies found in 'processed/archived_vacancies/'.")
+            archived_vacancies = get_vacancies(status="archived")
+            if not archived_vacancies:
+                print("\nNo archived vacancies found in SQLite database.")
                 continue
                 
-            print("\nSelect the vacancy you wish to resume:")
-            for idx, file in enumerate(history_files, 1):
-                print(f"{idx}. {file}")
+            print("\nSelect the archived vacancy you wish to resume:")
+            for idx, v in enumerate(archived_vacancies, 1):
+                star_tag = "⭐ " if v.get("is_starred") else ""
+                print(f"{idx}. {star_tag}{v['title']} [ID #{v['id']}]")
             print("q. [Back to main menu]")
             
             sel = input("\nOption: ").strip()
@@ -419,8 +556,8 @@ def main():
                 continue
             elif sel.isdigit():
                 sel_idx = int(sel)
-                if 1 <= sel_idx <= len(history_files):
-                    vac_file = history_files[sel_idx - 1]
+                if 1 <= sel_idx <= len(archived_vacancies):
+                    vac = archived_vacancies[sel_idx - 1]
                     
                     try:
                         target_input = input("\nEnter minimum candidates to evaluate in this run [5]: ").strip()
@@ -429,8 +566,8 @@ def main():
                         print("[Info] Invalid input. Defaulting to 5.")
                         min_target = 5
                         
-                    processed_history = load_processed_urls()
-                    process_vacancy(vac_file, "processed/archived_vacancies", config, processed_history, min_target)
+                    processed_history = get_processed_urls_from_db()
+                    process_vacancy(vac, config, processed_history, min_target)
                 else:
                     print("Invalid option.")
             else:
@@ -439,6 +576,11 @@ def main():
         elif opc == "3":
             # Start interactive CLI browser
             run_cli()
+
+        elif opc == "4":
+            # Launch Web Dashboard
+            from dashboard import start_dashboard
+            start_dashboard(open_browser=True)
             
         elif opc.lower() == "q":
             print("\nExiting ReferLooker. See you soon!")
@@ -450,3 +592,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
