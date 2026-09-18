@@ -3432,6 +3432,8 @@
             if (elContacted) elContacted.innerText = contacted;
         }
 
+        let activeDiscardRecommendation = null;
+
         async function fetchDiscardInsights() {
             if (!currentVacancy) return;
             const banner = document.getElementById('pipeline-insight-banner');
@@ -3441,6 +3443,7 @@
                 const res = await fetch(`/api/vacancies/${currentVacancy.id}/discard-insights`);
                 const data = await res.json();
                 if (data.success && data.has_insight) {
+                    activeDiscardRecommendation = data.recommendation;
                     const titleEl = document.getElementById('insight-title');
                     const descEl = document.getElementById('insight-desc');
                     const tipEl = document.getElementById('insight-tip');
@@ -3449,11 +3452,23 @@
                     if (tipEl) tipEl.innerText = data.recommendation;
                     banner.style.display = 'flex';
                 } else {
+                    activeDiscardRecommendation = null;
                     banner.style.display = 'none';
                 }
             } catch (e) {
                 console.error("Error fetching discard insights:", e);
                 banner.style.display = 'none';
+            }
+        }
+
+        function openCopilotStudio() {
+            if (!currentVacancy) return;
+            openStartSearchModal(currentVacancy.id);
+            if (activeDiscardRecommendation) {
+                setTimeout(() => {
+                    const promptText = `Please refine our search query according to this discard insight: ${activeDiscardRecommendation}`;
+                    sendCopilotSuggestion(promptText);
+                }, 1200);
             }
         }
 
