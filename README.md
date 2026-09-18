@@ -5,6 +5,40 @@ ReferLooker is an automated, unattended recruitment and candidate sourcing platf
 
 ---
 
+## 🖥️ Platform Showcase
+
+<div align="center">
+  <h3>✨ Modern ATS Kanban Pipeline with AI Match Scoring</h3>
+  <img src="docs/images/01_kanban_pipeline.png" alt="ReferLooker Kanban Board" width="95%" />
+
+  <br/><br/>
+
+  <table width="100%">
+    <tr>
+      <td width="50%" align="center">
+        <h4>🧠 AI Sourcing Copilot Studio</h4>
+        <img src="docs/images/02_copilot_studio.png" alt="Copilot Studio" width="100%" />
+      </td>
+      <td width="50%" align="center">
+        <h4>✉️ Personalized AI Outreach Studio</h4>
+        <img src="docs/images/03_outreach_modal.png" alt="Outreach Studio" width="100%" />
+      </td>
+    </tr>
+    <tr>
+      <td width="50%" align="center">
+        <h4>🛡️ AI Geofencing & Discard Diagnostics</h4>
+        <img src="docs/images/04_discarded_insights.png" alt="Discard Diagnostics" width="100%" />
+      </td>
+      <td width="50%" align="center">
+        <h4>📋 Job Requisitions Hub</h4>
+        <img src="docs/images/05_requisitions_hub.png" alt="Requisitions Hub" width="100%" />
+      </td>
+    </tr>
+  </table>
+</div>
+
+---
+
 ## 🌟 Key Highlights & Core Capabilities
 
 *   🎯 **Job Requisitions Hub**: Manage multiple concurrent job requisitions with priority starring, status tracking (Active / Archived), and real-time metric counters.
