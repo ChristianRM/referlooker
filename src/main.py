@@ -341,6 +341,7 @@ def process_vacancy(
             print(f"--> Match Score: {score}% | OpenToWork: {open_to_work}")
             
             # Save candidate details
+            default_status = "new" if int(score) >= 60 else "discarded"
             candidate_record = {
                 "vacancy_id": vac_id,
                 "vacancy": vac_title,
@@ -351,7 +352,7 @@ def process_vacancy(
                 "auxiliary_score": int(evaluation.get("auxiliary_score", 0)),
                 "score": int(score),
                 "open_to_work": bool(open_to_work),
-                "status": "new",
+                "status": default_status,
                 "evaluation_summary": eval_summary,
                 "linkedin_url": url,
                 "location": profile.get("location") or "Not specified",

@@ -403,19 +403,45 @@ def _run_sourcing_worker(vacancy_id: int, min_target: int, custom_query: Optiona
     def on_eval(cand_record):
         if vacancy_id not in sourcing_jobs:
             return
-        c_summary = {
-            "id": cand_record.get("id"),
-            "name": cand_record.get("name", "Unknown"),
-            "headline": cand_record.get("headline", ""),
-            "score": cand_record.get("score", 0),
-            "location": cand_record.get("location", ""),
-            "open_to_work": cand_record.get("open_to_work", False),
-            "linkedin_url": cand_record.get("linkedin_url", ""),
-            "evaluation_summary": cand_record.get("evaluation_summary", "")
-        }
-        if "matched_candidates" not in sourcing_jobs[vacancy_id]:
-            sourcing_jobs[vacancy_id]["matched_candidates"] = []
-        sourcing_jobs[vacancy_id]["matched_candidates"].append(c_summary)
+        score = cand_record.get("score", 0)
+        status = cand_record.get("status", "new")
+        loc_comp = cand_record.get("location_compatible", 1)
+        eval_summary = cand_record.get("evaluation_summary", "")
+        
+        is_viable = (score >= 60) and (loc_comp == 1 or loc_comp is True) and (status not in ('discarded', 'location_mismatch'))
+        
+        if is_viable:
+            c_summary = {
+                "id": cand_record.get("id"),
+                "name": cand_record.get("name", "Unknown"),
+                "headline": cand_record.get("headline", ""),
+                "score": score,
+                "location": cand_record.get("location", ""),
+                "open_to_work": cand_record.get("open_to_work", False),
+                "linkedin_url": cand_record.get("linkedin_url", ""),
+                "evaluation_summary": eval_summary
+            }
+            if "matched_candidates" not in sourcing_jobs[vacancy_id]:
+                sourcing_jobs[vacancy_id]["matched_candidates"] = []
+            sourcing_jobs[vacancy_id]["matched_candidates"].append(c_summary)
+        else:
+            discard_info = {
+                "name": cand_record.get("name", "LinkedIn Member"),
+                "headline": cand_record.get("headline", "Profile evaluated"),
+                "location": cand_record.get("location", "Not specified"),
+                "score": score,
+                "linkedin_url": cand_record.get("linkedin_url", ""),
+                "type": "low_score" if (loc_comp == 1 and "location mismatch" not in eval_summary.lower()) else "location_mismatch",
+                "reason": f"Low match score ({score}%): {eval_summary[:110]}..." if (loc_comp == 1 and "location mismatch" not in eval_summary.lower()) else f"Location mismatch / Discarded ({score}%)."
+            }
+            if "discarded_candidates" not in sourcing_jobs[vacancy_id]:
+                sourcing_jobs[vacancy_id]["discarded_candidates"] = []
+            sourcing_jobs[vacancy_id]["discarded_candidates"].append(discard_info)
+            
+            stats = sourcing_jobs[vacancy_id].setdefault("discard_stats", {"location_mismatch": 0, "error": 0, "low_score": 0, "total_discarded": 0})
+            stats["total_discarded"] = stats.get("total_discarded", 0) + 1
+            dtype = discard_info["type"]
+            stats[dtype] = stats.get(dtype, 0) + 1
         
     def on_discard(discard_info):
         if vacancy_id not in sourcing_jobs:

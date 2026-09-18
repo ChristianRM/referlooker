@@ -463,12 +463,18 @@ def upsert_candidate(candidate_info: dict, db_path: str = DB_PATH) -> int:
             "location incompatible" in evaluation_summary.lower()
         )
         location_compatible = not is_loc_mismatch
-        status = "location_mismatch" if (is_loc_mismatch and raw_status == "new") else raw_status
     
     try:
         score = int(candidate_info.get("score", 0))
     except (ValueError, TypeError):
         score = 0
+        
+    if is_loc_mismatch and raw_status == "new":
+        status = "location_mismatch"
+    elif raw_status == "new" and score < 60:
+        status = "discarded"
+    else:
+        status = raw_status
         
     try:
         tech_score = int(candidate_info.get("technical_score", 0))
