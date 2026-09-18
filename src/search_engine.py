@@ -67,7 +67,8 @@ def search_candidates_via_playwright(query: str, max_results: int, config: dict,
     """
     urls = []
     # Force headful mode with stealth flags for Google search
-    print(f"[Fallback] Launching direct Google search with Playwright in headful mode at offset {start_offset}...")
+    page_idx = (start_offset // max(1, max_results)) + 1
+    print(f"[Fallback] Launching direct Google search with Playwright in headful mode (Page {page_idx})...")
     
     with sync_playwright() as p:
         try:
@@ -281,7 +282,8 @@ def search_candidates(query: str, config: dict, start_offset: int = 0) -> list:
     
     urls = []
     
-    print(f"Starting search using engine '{engine}' with query: {query} (offset: {start_offset})")
+    page_idx = (start_offset // max(1, max_results)) + 1
+    print(f"Starting search using engine '{engine}' with query: {query} (Page {page_idx})")
     
     # 1. Check if direct LinkedIn search with session cookies is available (preferred & most reliable)
     if os.path.exists("cookies.json") and engine in ("auto", "linkedin_direct", "google_cse", "google_playwright"):

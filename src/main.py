@@ -192,10 +192,11 @@ def process_vacancy(
         refined_query, query_changed = check_query_update(refined_query)
         if query_changed:
             current_offset = 0
-            report_progress(f"Search query updated. Searching with new parameters...", evaluations_count)
+            report_progress(f"Search query updated. Searching Page 1 with new parameters...", evaluations_count)
 
-        print(f"\n[Search] Executing query search starting at offset {current_offset}...")
-        report_progress(f"Searching candidate profiles (offset {current_offset})...", evaluations_count)
+        page_num = (current_offset // max(1, min_target)) + 1
+        print(f"\n[Search] Executing query search (Page {page_num})...")
+        report_progress(f"Searching candidate profiles (Page {page_num})...", evaluations_count)
         candidate_urls = search_candidates(refined_query, config, start_offset=current_offset)
         
         wait_if_paused()
