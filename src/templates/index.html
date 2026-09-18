@@ -2659,9 +2659,9 @@
     <div class="modal-overlay" id="candidate-modal" onclick="closeModalOnOverlay(event, 'candidate-modal')">
         <div class="modal-content">
             <div class="modal-header">
-                <div style="display: flex; align-items: center; gap: 0.85rem;">
-                    <div class="stat-icon-wrapper" style="background: var(--primary-glow); color: #a5b4fc; width: 40px; height: 40px;">
-                        <i class="fa-solid fa-user"></i>
+                <div style="display: flex; align-items: center; gap: 0.95rem;">
+                    <div id="modal-candidate-avatar" class="stat-icon-wrapper" style="background: linear-gradient(135deg, #6366f1, #3b82f6); color: white; width: 44px; height: 44px; border-radius: 12px; font-weight: 800; font-family: 'Outfit', sans-serif; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); flex-shrink: 0; letter-spacing: -0.02em;">
+                        SA
                     </div>
                     <div>
                         <h2 id="modal-candidate-name" style="font-family: 'Outfit', sans-serif; font-size: 1.25rem;">-</h2>
@@ -3773,6 +3773,14 @@
                 if (!data.success) return;
 
                 activeCandidate = data.candidate;
+
+                // Set dynamic initials avatar
+                const nameParts = (activeCandidate.name || '').trim().split(/\s+/);
+                const initials = nameParts.length === 1 
+                    ? nameParts[0].substring(0, 2).toUpperCase() 
+                    : ((nameParts[0][0] || '') + (nameParts[nameParts.length - 1][0] || '')).toUpperCase();
+                const avatarEl = document.getElementById('modal-candidate-avatar');
+                if (avatarEl) avatarEl.innerText = initials || 'AI';
 
                 document.getElementById('modal-candidate-name').innerText = activeCandidate.name;
                 document.getElementById('modal-candidate-headline').innerText = activeCandidate.headline || 'No headline available';
